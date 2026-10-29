@@ -197,12 +197,61 @@ void spacesCanBeCreatedWithInitialTabs() {
     require(model.session(model.space(fallback)->sessionID), "invalid default should recover to a named session");
 }
 
+void closingPinnedTabResetsItToItsPinnedPage() {
+    rail::BrowserModel model;
+    const auto pinned = model.state.activeTabID;
+    model.tab(pinned)->url = "https://mail.example.com/";
+    model.tab(pinned)->title = "Mail";
+    require(model.setPinned(pinned, true), "tab should pin");
+    model.tab(pinned)->url = "https://mail.example.com/message/42";
+    model.tab(pinned)->title = "A message";
+    const auto other = model.addTab("work", "https://example.com/", 50);
+    require(model.selectTab(pinned, 60), "pinned tab should be selectable");
+    require(model.closeTab(pinned, 70), "pinned tab should close");
+    const auto* kept = model.tab(pinned);
+    require(kept && kept->pinned, "closed pinned tab should stay pinned");
+    require(kept->url == "https://mail.example.com/" && kept->title == "Mail", "closed pinned tab should return to its pinned page");
+    require(model.state.activeTabID == other, "closing should select another tab in the Space");
+    require(model.closeTab(other, 80), "regular tab should close");
+    require(model.state.activeTabID == pinned, "the pinned tab remains when it is the last one");
+    require(model.closeTab(pinned, 90) && model.tab(pinned), "closing the only remaining pinned tab keeps it");
+    require(model.tab(model.state.activeTabID)->url == "about:blank", "a blank tab should open in its place");
+    require(model.setPinned(pinned, false) && model.tab(pinned)->pinnedURL.empty(), "unpinning should forget the pinned page");
+}
+
+void closedTabsCanBeReopened() {
+    rail::BrowserModel model;
+    const auto first = model.state.activeTabID;
+    model.tab(first)->url = "https://first.example/";
+    const auto second = model.addTab("work", "https://second.example/", 10);
+    model.setIsolated(second);
+    require(model.closeTab(second, 20) && !model.tab(second), "tab should close");
+    require(model.reopenClosedTab(30) == second, "closed tab should come back with its ID");
+    const auto* back = model.tab(second);
+    require(back && back->url == "https://second.example/", "reopened tab should keep its page");
+    require(back->sessionID == rail::BrowserModel::isolatedSessionID(second), "reopened tab should keep its isolated profile");
+    require(model.state.activeTabID == second, "reopened tab should be selected");
+
+    require(model.closeTab(second, 40) && model.closeTab(first, 50), "both tabs should close");
+    const auto blank = model.state.activeTabID;
+    require(model.tab(blank)->url == "about:blank", "closing the last tab leaves a blank one");
+    require(model.reopenClosedTab(60) == first && !model.tab(blank), "undo should replace the placeholder blank tab");
+    require(model.reopenClosedTab(70) == second, "undo should walk back through closed tabs");
+    require(model.state.tabs[0].id == first, "reopened tab should return to its position");
+
+    model.setPinned(first, true);
+    model.tab(first)->url = "https://first.example/deep";
+    require(model.closeTab(first, 80) && model.tab(first)->url == "https://first.example/", "pinned close resets");
+    require(model.reopenClosedTab(90) == first && model.tab(first)->url == "https://first.example/deep", "undo restores the pinned tab's page");
+    rail::BrowserModel empty;
+    require(empty.reopenClosedTab(1).empty(), "nothing to reopen without a closed tab");
+}
+
 void closingLastTabCreatesSelectedBlank() {
     rail::BrowserModel model;
     const auto old = model.state.activeTabID;
     model.setIsolated(old);
-    model.togglePin(old);
-    require(model.closeTab(old, 99), "last tab should close even when pinned");
+    require(model.closeTab(old, 99), "last tab should close");
     require(!model.tab(old), "closed tab metadata should be removed");
     require(model.state.tabs.size() == 3, "last tab should be replaced with a blank tab");
     require(model.state.activeTabID != old, "replacement should have a fresh ID");
@@ -255,6 +304,62 @@ bool isSafeIdentifier(const std::string& id) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
             || (c >= '0' && c <= '9') || c == '-' || c == '_';
     });
+}
+
+void globRulesMatchHostAndPath() {
+    using rail::BrowserModel;
+    require(BrowserModel::ruleMatches("dev.azure.com/contoso/**", "https://dev.azure.com/contoso/Project/_git/repo?path=/x"),
+            "** should match nested paths");
+    require(BrowserModel::ruleMatches("dev.azure.com/contoso/**", "https://dev.azure.com/contoso"),
+            "/** should match the prefix itself");
+    require(BrowserModel::ruleMatches("dev.azure.com/contoso/**", "https://dev.azure.com/Contoso/"),
+            "matching should ignore case");
+    require(!BrowserModel::ruleMatches("dev.azure.com/contoso/**", "https://dev.azure.com/contoso-other/x"),
+            "/** should not match a longer segment");
+    require(!BrowserModel::ruleMatches("dev.azure.com/contoso/**", "https://dev.azure.com/fabrikam/x"),
+            "other organizations should not match");
+    require(BrowserModel::ruleMatches("https://www.github.com/acme/*", "http://github.com/acme/site"),
+            "scheme and www. should be ignored");
+    require(!BrowserModel::ruleMatches("github.com/acme/*", "https://github.com/acme/site/issues"),
+            "* should stay within one segment");
+    require(BrowserModel::ruleMatches("*.visualstudio.com/**", "https://contoso.visualstudio.com/x"),
+            "* should match a subdomain");
+    require(BrowserModel::ruleMatches("localhost:3000/**", "http://localhost:3000/app"), "ports should match");
+    require(!BrowserModel::ruleMatches("localhost:3000/**", "http://localhost:4000/app"), "other ports should not match");
+    require(!BrowserModel::ruleMatches("dev.azure.com/contoso/**", "about:blank") , "blank pages should not match");
+    require(!BrowserModel::ruleMatches("  ", "https://example.com"), "blank patterns should match nothing");
+}
+
+void spaceRulesChooseMostSpecificSpace() {
+    rail::BrowserModel model;
+    const auto contoso = model.addSpace("contoso", "work", 1);
+    const auto fabrikam = model.addSpace("Fabrikam", "work", 1);
+    require(model.setSpaceRules(contoso, {"dev.azure.com/contoso/**", " ", "dev.azure.com/contoso/**/"}), "rules should save");
+    require(model.setSpaceRules(fabrikam, {"https://dev.azure.com/fabrikam/**"}), "rules should save");
+    require(model.setSpaceRules("work", {"dev.azure.com/**"}), "rules should save");
+    require(model.rulesForSpace(contoso) == std::vector<std::string>{"dev.azure.com/contoso/**"},
+            "blank and duplicate patterns should be dropped");
+    require(model.rulesForSpace(fabrikam) == std::vector<std::string>{"dev.azure.com/fabrikam/**"},
+            "patterns should be stored normalized");
+    require(model.spaceForURL("https://dev.azure.com/contoso/x/_build") == contoso, "contoso links should go to contoso");
+    require(model.spaceForURL("https://dev.azure.com/fabrikam/y") == fabrikam, "Fabrikam links should go to Fabrikam");
+    require(model.spaceForURL("https://dev.azure.com/someone-else") == "work", "broader rule should catch the rest");
+    require(model.spaceForURL("https://example.com/").empty(), "unmatched links should have no Space");
+    require(!model.setSpaceRules("missing", {"example.com"}), "unknown Spaces should be rejected");
+    require(model.setSpaceRules("personal", {"DEV.azure.com/fabrikam/**"}), "rules should save");
+    require(model.rulesForSpace(fabrikam).empty() && model.spaceForURL("https://dev.azure.com/fabrikam/y") == "personal",
+            "saving a pattern should move it from its previous Space");
+    require(model.setSpaceRules(contoso, {}), "clearing should succeed");
+    require(model.spaceForURL("https://dev.azure.com/contoso/x") == "work", "cleared rules should no longer match");
+}
+
+void sanitizeRepairsSpaceRules() {
+    rail::BrowserModel model;
+    model.state.spaceRules = {{"example.com/**", "personal"}, {"", "work"}, {"other.com", "missing"},
+                              {"EXAMPLE.com/**", "work"}};
+    model.sanitize(10);
+    require(model.state.spaceRules.size() == 1, "invalid, orphaned and duplicate rules should be dropped");
+    require(model.state.spaceRules[0].spaceID == "personal", "the first claim on a pattern should win");
 }
 
 void requireValidState(const rail::BrowserModel& model, double now) {
@@ -379,11 +484,16 @@ int main(int argc, char** argv) {
         {"add-session", namedSessionsCanBeCreated},
         {"add-space", spacesCanBeCreatedWithInitialTabs},
         {"close-last", closingLastTabCreatesSelectedBlank},
+        {"close-pinned", closingPinnedTabResetsItToItsPinnedPage},
+        {"reopen", closedTabsCanBeReopened},
         {"close-background", closingBackgroundTabPreservesSelection},
         {"move", movingTabsPreservesIdentity},
         {"sanitize-empty", sanitizeRecoversEmptyState},
         {"sanitize-malformed", sanitizeRepairsMalformedReferences},
         {"sanitize-valid", sanitizePreservesValidState},
+        {"rule-glob", globRulesMatchHostAndPath},
+        {"rule-space", spaceRulesChooseMostSpecificSpace},
+        {"rule-sanitize", sanitizeRepairsSpaceRules},
     };
     unsigned passed = 0;
     unsigned failed = 0;

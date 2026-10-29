@@ -31,20 +31,28 @@ The selection stays in the local CMake cache. This workspace is already configur
 | Hide/show sidebar and Spaces rail | **⌘ S** |
 | Address or search | **⌘ L** |
 | New / close tab | **⌘ T** / **⌘ W** |
+| Reopen closed tab | **⌘ Z** right after closing, or **⇧ ⌘ T** any time |
 | Reload | **⌘ R** |
 | Back / forward | **⌘ [** / **⌘ ]** |
 | Find in page | **⌘ F** |
 | Select a tab in the current Space | **⌘ 1–9** |
-| Pin, unpin, unload, or move a tab | Right-click the tab |
+| Switch to recently used tabs | Hold **⌃** and press **Tab** (**⇧** to go back); release **⌃** to switch |
+| Pin or unpin a tab | Drag it into or out of **Pinned**, or right-click it |
+| Unload or move a tab | Right-click the tab |
 | Change the current tab's session | Toolbar session picker or tab badge |
 | Create a reusable session | Session picker → New session |
 | Switch / add Spaces | Icons / plus in the left rail |
 | Rename Space / set its default session | Ellipsis beside the Space name |
+| Send matching links to a Space | Ellipsis beside the Space name → Open Links in This Space |
 | Change idle timeout | Settings button or **⌘ ,** |
 
 Work and Personal are reusable named sessions. Tabs in the same named session share cookies and site storage, even across Spaces. **Isolated** gives that tab a separate, persistent profile. It keeps its login after unloading and restarting; it is not an incognito mode. Changing sessions reloads the current URL in the chosen profile.
 
+Pinned tabs remember the page they were pinned on. Closing a pinned tab (**⌘ W**) keeps it pinned, unloads it and returns it to that page, as in Arc.
+
 Spaces organize tabs independently of sessions. A Space's default session applies to new tabs. Its existing tabs keep their current sessions.
+
+A Space can claim links by address pattern, one per line, for example `dev.azure.com/contoso/**` for a Contoso Space and `dev.azure.com/fabrikam/**` for a Fabrikam Space. Patterns match host (with port) and path, ignoring scheme, `www.`, query, fragment and case. `*` matches within one path segment, `**` matches anything; a trailing `/**` also matches the prefix itself. When several patterns match, the most specific wins. Rules apply to links from other apps, links that open a new tab (which then use the target Space's session and lose `window.opener`), and addresses typed into a new blank tab. Navigation inside an existing tab stays where it is.
 
 After **10 minutes** out of selection, a tab's actual CEF browser is closed. The timeout is configurable to 1, 5, 10, 15, 30, or 60 minutes and checked every five seconds. Pinned tabs follow the same rule. The selected tab stays awake. Reopening an unloaded tab creates a new Chromium page at its saved URL.
 

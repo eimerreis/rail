@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1c1e"/><stop offset="1" stop-color="#050505"/></linearGradient>
+  <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <filter id="drop" x="-10%" y="-10%" width="120%" height="125%"><feGaussianBlur stdDeviation="14"/><feOffset dy="10"/><feComponentTransfer><feFuncA type="linear" slope=".35"/></feComponentTransfer></filter>
+  <clipPath id="clip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  <linearGradient id="main" gradientUnits="userSpaceOnUse" x1="0" y1="960" x2="0" y2="200"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#d1d1d6"/></linearGradient>
+  <linearGradient id="branch" gradientUnits="userSpaceOnUse" x1="400" y1="760" x2="680" y2="230"><stop offset="0" stop-color="#8e8e93"/><stop offset="1" stop-color="#3a3a3e"/></linearGradient>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="#000" filter="url(#drop)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+<g clip-path="url(#clip)" fill="none" stroke-linecap="round">
+  <path d="M400 800 C 400 580, 660 560, 660 250" stroke="url(#branch)" stroke-width="66"/>
+  <path d="M400 980 V 250" stroke="url(#main)" stroke-width="66"/>
+</g>
+<rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#rimg)" stroke-width="3"/>
+</svg>

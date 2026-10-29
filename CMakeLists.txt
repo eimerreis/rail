@@ -9,12 +9,15 @@ include(CTest)
 option(EIMERRAIL_BUILD_APP "Build the native macOS browser and CEF helpers" ON)
 set(EIMERRAIL_SIGN_IDENTITY "-" CACHE STRING "Local macOS signing identity; '-' uses ad-hoc signing")
 
-add_library(BrowserModel STATIC src/BrowserModel.cpp)
+add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp)
 target_include_directories(BrowserModel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 if(BUILD_TESTING)
   add_executable(BrowserModelTests tests/BrowserModelTests.cpp)
   target_link_libraries(BrowserModelTests PRIVATE BrowserModel)
   add_test(NAME BrowserModelTests COMMAND BrowserModelTests)
+  add_executable(HistoryTests tests/HistoryTests.cpp)
+  target_link_libraries(HistoryTests PRIVATE BrowserModel)
+  add_test(NAME HistoryTests COMMAND HistoryTests)
   if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/StateStoreTests.mm")
     enable_language(OBJCXX)
     add_executable(StateStoreTests tests/StateStoreTests.mm src/StateStore.mm)
@@ -142,9 +145,12 @@ set_property(TARGET Eimerrail APPEND PROPERTY LINK_DEPENDS
   "${CEF_BINARY_DIR_RELEASE}/Chromium Embedded Framework.framework/Chromium Embedded Framework"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements.plist"
+  "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.icns"
 )
 add_custom_command(TARGET Eimerrail POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${CEF_APP}/Contents/Resources"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.icns" "${CEF_APP}/Contents/Resources/AppIcon.icns"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${CEF_ROOT}/LICENSE.txt" "${CEF_APP}/Contents/Resources/CEF-LICENSE.txt"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different

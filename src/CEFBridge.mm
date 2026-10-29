@@ -53,6 +53,9 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   void OnTitleChange(CefRefPtr<CefBrowser>, const CefString &title) override {
     [controller_ updateTitle:S(title) tab:tabID_ generation:generation_];
   }
+  void OnFaviconURLChange(CefRefPtr<CefBrowser>, const std::vector<CefString> &urls) override {
+    if (!urls.empty()) [controller_ updateFavicon:S(urls.front()) tab:tabID_ generation:generation_];
+  }
   void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, const CefString &url) override {
     if (frame->IsMain()) [controller_ updateURL:S(url) tab:tabID_ generation:generation_];
   }

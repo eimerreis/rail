@@ -8,11 +8,13 @@
 - (void)start;
 - (void)quit:(id)sender;
 - (BOOL)handleShortcut:(NSEvent *)event;
+- (void)openExternalURLs:(NSArray<NSURL *> *)urls;
 - (void)browserCreated:(CefRefPtr<CefBrowser>)browser tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)browserReadyToClose:(CefRefPtr<CefBrowser>)browser tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)browserClosed:(const std::string &)tab generation:(uint64_t)generation;
 - (void)closeCancelled:(const std::string &)tab generation:(uint64_t)generation;
 - (void)updateTitle:(NSString *)title tab:(const std::string &)tab generation:(uint64_t)generation;
+- (void)updateFavicon:(NSString *)iconURL tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)updateURL:(NSString *)url tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)updateLoading:(BOOL)loading back:(BOOL)back forward:(BOOL)forward tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)loadFailed:(NSString *)message tab:(const std::string &)tab generation:(uint64_t)generation;

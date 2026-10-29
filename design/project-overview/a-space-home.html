@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eimerrail — Project overview · A · Space home</title>
+<link rel="stylesheet" href="shell.css">
+<style>
+.page{padding:30px 40px 0}
+.head{display:flex;align-items:flex-end;gap:16px;margin-bottom:22px}
+.head h1{font-size:22px;font-weight:650;letter-spacing:-.4px;margin:0 0 5px}
+.head p{margin:0;font-size:12px;color:var(--sub);display:flex;gap:14px;align-items:center}
+.head p span{display:inline-flex;align-items:center;gap:6px}
+.head .tools{margin-left:auto;display:flex;gap:10px;align-items:center}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{border:1px solid var(--line);border-radius:12px;padding:16px 16px 16px 20px;display:grid;align-content:start;grid-template-columns:1fr 262px;column-gap:22px;background:#fff}
+.card.hot{border-color:#ecc4bc;box-shadow:0 1px 2px rgba(176,58,44,.06),0 6px 18px -10px rgba(176,58,44,.25)}
+.card h2{grid-column:1/-1;display:flex;align-items:center;gap:9px;margin:0;font-size:15px;font-weight:650;letter-spacing:-.2px}
+.card h2 .fav{width:18px;height:18px;border-radius:5px}
+.card h2 .more{margin-left:auto;margin-right:-4px}
+.meta{grid-column:1/-1;font-size:11px;color:var(--sub);margin:3px 0 14px 27px}
+.state{display:flex;flex-direction:column;gap:10px;min-width:0}
+.state .pills{display:flex;flex-wrap:wrap;gap:6px}
+.state .why{font-size:11px;color:var(--sub);line-height:1.5;margin:0}
+.state .why b{color:var(--ink);font-weight:550}
+.chart{border-top:1px solid var(--line-soft);padding-top:10px;margin-top:2px}
+.chart .cap{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:10px;color:var(--sub);margin-bottom:4px}
+.chart .cap b{font-size:13px;color:var(--crit);font-weight:650}
+.chart svg{display:block;width:100%;height:70px;overflow:visible}
+.chart .x{display:flex;justify-content:space-between;font-size:9.5px;color:var(--sub);margin-top:4px}
+.tests{margin:0;padding:0;list-style:none;font-size:10.5px;color:var(--ink);display:grid;gap:5px}
+.tests li{display:flex;gap:7px;align-items:center;min-width:0}
+.tests li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tests svg{width:12px;height:12px;color:var(--crit)}
+.links-row{display:flex;gap:6px;margin-top:auto}
+.envs{display:grid;gap:6px;align-content:start;position:relative}
+.env{display:flex;align-items:center;gap:9px;height:34px;padding:0 8px 0 10px;border:1px solid var(--line);border-radius:7px;font-size:11.5px;background:#fff;white-space:nowrap}
+.env > svg{width:14px;height:14px;color:var(--sub)}
+.env .lbl{font-weight:600;width:62px}
+.env .lbl.caps{font-size:10.5px;letter-spacing:.3px}
+.env .val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--sub);font-size:11px;display:flex;align-items:center;gap:6px}
+.env .val .crit{color:var(--crit);font-weight:550}
+.env .val .warn{color:var(--warn);font-weight:550}
+.env.hover{background:#f1f5f9;border-color:#bfccd9}
+.tip{position:absolute;right:-6px;top:calc(100% + 6px);z-index:3;width:236px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:10px 11px;font-size:11px;box-shadow:0 10px 30px -8px rgba(39,52,69,.28),0 2px 6px rgba(39,52,69,.08)}
+.tip .r{display:flex;align-items:center;gap:7px}
+.tip .r + .r{margin-top:7px;color:var(--sub);font-size:10.5px}
+.tip .r .mono{color:var(--ink)}
+.tip kbd{margin-left:auto}
+.card.short{grid-template-columns:1fr 262px}
+</style>
+</head>
+<body>
+<script src="icons.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn current" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn" aria-label="Settings"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="space-head">Work<button class="icon-btn"><svg class="i"><use href="#dots"/></svg></button></div>
+    <div class="space-desc">A little room for good work.</div>
+    <div class="side-scroll">
+      <div class="rows"><div class="row sel"><span class="fav" style="color:var(--accent)"><svg class="i"><use href="#grid"/></svg></span><span class="t">Work home</span><span class="mk">W</span></div></div>
+      <div class="sec">Projects<span class="count">5</span></div>
+      <div class="rows">
+        <div class="row"><span class="dot crit"></span><span class="t">Billing API</span></div>
+        <div class="row"><span class="dot crit"></span><span class="t">License Service</span></div>
+        <div class="row"><span class="dot warn"></span><span class="t">Webhook Relay</span></div>
+        <div class="row"><span class="dot busy"></span><span class="t">Customer Portal</span></div>
+        <div class="row"><span class="dot ok"></span><span class="t">Status Page</span></div>
+      </div>
+      <div class="sec">Pinned</div>
+      <div class="pins">
+        <div class="pin"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>DevOps</div>
+        <div class="pin"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>GitHub</div>
+        <div class="pin"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span>Insights</div>
+        <div class="pin"><span class="fav"><svg class="i"><use href="#calendar"/></svg></span>Calendar</div>
+      </div>
+      <div class="sec">Tabs</div>
+      <div class="rows">
+        <div class="row"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">PR 482 · Retry invoice export</span><span class="mk">W</span></div>
+        <div class="row"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span><span class="t">Failures · billing-prod</span><span class="mk i">I</span></div>
+        <div class="row"><span class="fav local"><svg class="i"><use href="#laptop"/></svg></span><span class="t">localhost:3000</span><span class="mk">W</span></div>
+        <div class="row asleep"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Sprint 41 board</span><span class="moon"><svg class="i"><use href="#moon"/></svg></span></div>
+      </div>
+      <div class="new-tab"><svg class="i"><use href="#plus"/></svg>New tab</div>
+    </div>
+    <div class="side-foot">1 asleep · after 10 min</div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn dim"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#grid"/></svg><b>Work home</b></div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <div class="head">
+        <div>
+          <h1>Projects</h1>
+          <p><span><span class="dot crit"></span>2 need attention</span><span><span class="dot run"></span>3 running locally</span><span class="num">Checked 14:31</span></p>
+        </div>
+        <div class="tools">
+          <div class="seg"><span class="on">All <span class="n">5</span></span><span>Needs attention <span class="n">2</span></span><span>Local <span class="n">3</span></span></div>
+          <button class="btn line"><svg class="i"><use href="#plus"/></svg>Add project</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <!-- Billing API -->
+        <article class="card hot">
+          <h2><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>Billing API<button class="icon-btn more"><svg class="i"><use href="#dots"/></svg></button></h2>
+          <div class="meta">contoso/billing-api · main · Azure DevOps</div>
+          <div class="state">
+            <div class="pills"><span class="pill crit"><svg class="i"><use href="#alert"/></svg>Failed requests 4.2% on PROD</span><span class="pill info"><svg class="i"><use href="#approve"/></svg>v2.31.0 waiting for approval</span></div>
+            <div class="chart">
+              <div class="cap"><span>Failed requests · last 2 h</span><b class="num">4.2%</b></div>
+              <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                <line x1="0" y1="48" x2="300" y2="48" stroke="#d9533f" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke"/>
+                <path d="M0 62 L20 61 L40 63 L60 60 L80 62 L100 61 L120 62 L140 60 L160 61 L180 59 L200 62 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 18 L300 70 L0 70Z" fill="#fbe6e2"/>
+                <path d="M0 62 L20 61 L40 63 L60 60 L80 62 L100 61 L120 62 L140 60 L160 61 L180 59 L200 62 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 18" fill="none" stroke="#b03a2c" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+                <line x1="226" y1="4" x2="226" y2="70" stroke="#273445" stroke-width="1" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="x num"><span>12:30</span><span>limit 2% · onset 14:14</span><span>14:31</span></div>
+            </div>
+            <p class="why"><b>Since 14:14</b>, mostly <span class="mono">POST /invoices/export</span> timing out against the ledger database.</p>
+          </div>
+          <div class="envs">
+            <div class="env"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val">2 open PRs</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#pipeline"/></svg><span class="lbl">Pipelines</span><span class="val"><span class="dot ok"></span><span class="num">main #2148 · 41 m</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#laptop"/></svg><span class="lbl">Local</span><span class="val"><span class="dot run"></span><span class="mono">:5001</span> running</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">INT</span><span class="val"><span class="dot ok"></span><span class="num">v2.31.0 · 212 ms</span></span><span class="mk">W</span></div>
+            <div class="env hover"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">PROD</span><span class="val"><span class="dot crit"></span><span class="crit num">v2.30.4 · alert</span></span><span class="mk i">I</span></div>
+            <div class="tip">
+              <div class="r"><span class="mk i">I</span>Opens in its Isolated session<kbd>↩</kbd></div>
+              <div class="r"><span class="mono">billing.contoso.com</span></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- License Service -->
+        <article class="card hot">
+          <h2><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>License Service<button class="icon-btn more"><svg class="i"><use href="#dots"/></svg></button></h2>
+          <div class="meta">contoso/license-service · release/2.14 · Azure DevOps</div>
+          <div class="state">
+            <div class="pills"><span class="pill crit"><svg class="i"><use href="#x"/></svg>INT deploy failed</span><span class="pill warn"><svg class="i"><use href="#queue"/></svg>12 dead-lettered messages</span></div>
+            <p class="why"><b>release/2.14 #881</b> stopped at integration tests 26 min ago. INT still runs v2.13.1.</p>
+            <ul class="tests">
+              <li><svg class="i"><use href="#x"/></svg><span class="mono">BundleRenewalTests.Renew_ExpiredBundle</span></li>
+              <li><svg class="i"><use href="#x"/></svg><span class="mono">SeatSyncTests.Sync_RemovedSeat</span></li>
+              <li><svg class="i"><use href="#x"/></svg><span class="mono">SeatSyncTests.Sync_TransferredSeat</span></li>
+            </ul>
+            <div class="links-row"><button class="btn tint"><svg class="i"><use href="#reload"/></svg>Rerun failed stage</button><button class="btn quiet">Open run</button></div>
+          </div>
+          <div class="envs">
+            <div class="env"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val">1 open PR</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#pipeline"/></svg><span class="lbl">Pipelines</span><span class="val"><span class="dot crit"></span><span class="crit num">#881 failed</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#laptop"/></svg><span class="lbl">Local</span><span class="val"><span class="dot off"></span><span class="mono">:7071</span> not running</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">INT</span><span class="val"><span class="dot ok"></span><span class="num">v2.13.1 · 188 ms</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">PROD</span><span class="val"><span class="dot ok"></span><span class="num">v2.13.1 · 96 ms</span></span><span class="mk i">I</span></div>
+          </div>
+        </article>
+
+        <!-- Webhook Relay -->
+        <article class="card">
+          <h2><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>Webhook Relay<button class="icon-btn more"><svg class="i"><use href="#dots"/></svg></button></h2>
+          <div class="meta">contoso/webhook-relay · main · GitHub</div>
+          <div class="state">
+            <div class="pills"><span class="pill warn"><svg class="i"><use href="#bug"/></svg>3 new Sentry issues</span></div>
+            <p class="why"><b>TimeoutError in deliver()</b> · 27 events in the last hour, first seen 11:02.</p>
+          </div>
+          <div class="envs">
+            <div class="env"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val">no open PRs</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#pipeline"/></svg><span class="lbl">Actions</span><span class="val"><span class="dot ok"></span><span class="num">main · passing</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#laptop"/></svg><span class="lbl">Local</span><span class="val"><span class="dot run"></span><span class="mono">:8080</span> running</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">Staging</span><span class="val"><span class="dot ok"></span><span class="num">v0.9.5 · 151 ms</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">PROD</span><span class="val"><span class="dot warn"></span><span class="warn num">v0.9.4 · errors</span></span><span class="mk">W</span></div>
+          </div>
+        </article>
+
+        <!-- Customer Portal -->
+        <article class="card">
+          <h2><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>Customer Portal<button class="icon-btn more"><svg class="i"><use href="#dots"/></svg></button></h2>
+          <div class="meta">contoso/customer-portal · main · Azure DevOps</div>
+          <div class="state">
+            <div class="pills"><span class="pill info"><svg class="i"><use href="#clock"/></svg>Deploying to INT · 4 min</span></div>
+            <p class="why"><b>main #1093</b> by you · “Add invoice download to account page”. PROD v5.8.2 since yesterday 16:40.</p>
+          </div>
+          <div class="envs">
+            <div class="env"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val">5 open PRs</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#pipeline"/></svg><span class="lbl">Pipelines</span><span class="val"><span class="dot busy"></span><span class="num">#1093 running</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#laptop"/></svg><span class="lbl">Local</span><span class="val"><span class="dot run"></span><span class="mono">:3000</span> running</span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">INT</span><span class="val"><span class="dot busy"></span><span class="num">deploying v5.9.0</span></span><span class="mk">W</span></div>
+            <div class="env"><svg class="i"><use href="#globe"/></svg><span class="lbl caps">PROD</span><span class="val"><span class="dot ok"></span><span class="num">v5.8.2 · 120 ms</span></span><span class="mk i">I</span></div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>Status Page<button class="icon-btn more"><svg class="i"><use href="#dots"/></svg></button></h2>
+          <div class="meta">contoso/status-page · main · GitHub</div>
+          <div class="state"><div class="pills"><span class="pill ok"><svg class="i"><use href="#check"/></svg>All environments healthy</span></div></div>
+          <div class="envs">
+            <div class="env"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val">1 open PR</span><span class="mk">W</span></div>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <div class="status"><span><span class="sdot" style="width:6px;height:6px;border-radius:50%;background:#527eb1"></span>Work session</span><span>Idle tabs unload after 10 min</span></div>
+  </main>
+</div>
+</body>
+</html>

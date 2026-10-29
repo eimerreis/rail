@@ -79,6 +79,50 @@ IDMap repairIDs(Records& records, const char* kind, bool namedSessions = false) 
     return repaired;
 }
 
+std::string lowered(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+// Host (with port) and path, lowercased, without scheme, credentials, query, fragment or "www.".
+std::string ruleAddress(const std::string& url) {
+    auto text = trimmed(url);
+    if (const auto scheme = text.find("://"); scheme != std::string::npos) text.erase(0, scheme + 3);
+    text = text.substr(0, text.find_first_of("?#"));
+    const auto slash = text.find('/');
+    auto host = text.substr(0, slash);
+    auto path = slash == std::string::npos ? std::string{} : text.substr(slash);
+    if (const auto at = host.rfind('@'); at != std::string::npos) host.erase(0, at + 1);
+    host = lowered(host);
+    if (host.compare(0, 4, "www.") == 0) host.erase(0, 4);
+    if (path == "/") path.clear();
+    return host + lowered(path);
+}
+
+// "*" matches within one path segment, "**" across segments; "/**" may also match nothing.
+bool globMatch(const char* pattern, const char* text) {
+    while (*pattern) {
+        if (pattern[0] == '/' && pattern[1] == '*' && pattern[2] == '*' && (!pattern[3] || pattern[3] == '/')
+            && globMatch(pattern + 3, text)) return true;
+        if (pattern[0] == '*') {
+            const bool crossesSegments = pattern[1] == '*';
+            pattern += crossesSegments ? 2 : 1;
+            for (const char* rest = text;; ++rest) {
+                if (globMatch(pattern, rest)) return true;
+                if (!*rest || (!crossesSegments && *rest == '/')) return false;
+            }
+        }
+        if (*pattern != *text) return false;
+        ++pattern;
+        ++text;
+    }
+    return !*text;
+}
+
+size_t specificity(const std::string& pattern) {
+    return static_cast<size_t>(std::count_if(pattern.begin(), pattern.end(), [](char c) { return c != '*'; }));
+}
+
 std::string remapped(const IDMap& ids, const std::string& id) {
     const auto found = ids.find(id);
     return found == ids.end() ? id : found->second;
@@ -165,12 +209,67 @@ bool BrowserModel::closeTab(const std::string& id, double now) {
     const auto ownerID = current->spaceID;
     const auto closedID = current->id;
     const bool wasActive = state.activeTabID == closedID;
+    ClosedTab record{*current, static_cast<size_t>(current - state.tabs.data()), current->pinned, ""};
+    // Keep the undo stack short; it only covers recent mistakes.
+    auto remember = [&] {
+        closedTabs.push_back(record);
+        if (closedTabs.size() > 25) closedTabs.erase(closedTabs.begin());
+    };
+    if (current->pinned) {
+        // Closing a pinned tab keeps it pinned and puts it back to its pinned page.
+        auto* pinned = tab(closedID);
+        pinned->url = nameOr(pinned->pinnedURL, "about:blank");
+        pinned->title = nameOr(pinned->pinnedTitle, "New Tab");
+        if (!wasActive) { remember(); return true; }
+        const Tab* next = nullptr;
+        for (const auto& candidate : state.tabs) {
+            if (candidate.spaceID != ownerID || candidate.id == closedID) continue;
+            if (!next || candidate.lastUsed > next->lastUsed) next = &candidate;
+        }
+        if (next) selectTab(next->id, now);
+        else record.replacementID = addTab(ownerID, "about:blank", now);
+        remember();
+        return true;
+    }
     state.tabs.erase(std::remove_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& candidate) {
         return candidate.id == closedID;
     }), state.tabs.end());
+    const bool hadOthers = std::any_of(state.tabs.begin(), state.tabs.end(), [&](const Tab& other) { return other.spaceID == ownerID; });
     const auto replacement = ensureSpaceTab(ownerID, now);
+    if (!hadOthers) record.replacementID = replacement;
     if (wasActive) selectTab(replacement, now);
+    remember();
     return true;
+}
+std::string BrowserModel::reopenClosedTab(double now) {
+    while (!closedTabs.empty()) {
+        ClosedTab record = closedTabs.back();
+        closedTabs.pop_back();
+        Tab restored = record.tab;
+        if (!space(restored.spaceID)) restored.spaceID = state.activeSpaceID;
+        if (!space(restored.spaceID) || (!session(restored.sessionID) && restored.sessionID != isolatedSessionID(restored.id))) {
+            restored.sessionID = space(restored.spaceID) ? space(restored.spaceID)->sessionID : "";
+        }
+        if (!space(restored.spaceID)) continue;
+        if (record.pinnedReset) {
+            // The pinned tab is still there; give it back the page it was on.
+            auto* pinned = tab(restored.id);
+            if (!pinned) continue;
+            pinned->url = restored.url;
+            pinned->title = restored.title;
+        } else {
+            if (tab(restored.id)) continue;
+            state.tabs.insert(state.tabs.begin() + static_cast<std::ptrdiff_t>(std::min(record.index, state.tabs.size())), restored);
+        }
+        // Drop the blank tab that only existed because this one was closed.
+        if (const auto* blank = tab(record.replacementID); blank && blank->url == "about:blank" && !blank->pinned) {
+            const auto blankID = blank->id;
+            state.tabs.erase(std::remove_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& t) { return t.id == blankID; }), state.tabs.end());
+        }
+        selectTab(restored.id, now);
+        return restored.id;
+    }
+    return {};
 }
 bool BrowserModel::setSession(const std::string& tabID, const std::string& sessionID) {
     auto* current = tab(tabID);
@@ -183,9 +282,15 @@ bool BrowserModel::setIsolated(const std::string& tabID) {
     return setSession(tabID, isolatedSessionID(tabID));
 }
 bool BrowserModel::togglePin(const std::string& id) {
+    const auto* current = tab(id);
+    return current && setPinned(id, !current->pinned);
+}
+bool BrowserModel::setPinned(const std::string& id, bool pinned) {
     auto* current = tab(id);
     if (!current) return false;
-    current->pinned = !current->pinned;
+    if (pinned && !current->pinned) { current->pinnedURL = current->url; current->pinnedTitle = current->title; }
+    if (!pinned) { current->pinnedURL.clear(); current->pinnedTitle.clear(); }
+    current->pinned = pinned;
     return true;
 }
 bool BrowserModel::moveTab(const std::string& tabID, const std::string& targetSpaceID, double now) {
@@ -231,9 +336,56 @@ std::vector<std::string> BrowserModel::idleTabs(double now) const {
     }
     return result;
 }
+std::string BrowserModel::normalizedRulePattern(const std::string& pattern) {
+    auto normalized = ruleAddress(pattern);
+    while (normalized.size() > 1 && normalized.back() == '/') normalized.pop_back();
+    return normalized;
+}
+bool BrowserModel::ruleMatches(const std::string& pattern, const std::string& url) {
+    const auto normalized = normalizedRulePattern(pattern);
+    const auto address = ruleAddress(url);
+    return !normalized.empty() && !address.empty() && globMatch(normalized.c_str(), address.c_str());
+}
+std::string BrowserModel::spaceForURL(const std::string& url) const {
+    const SpaceRule* best = nullptr;
+    for (const auto& rule : state.spaceRules) {
+        if (!space(rule.spaceID) || !ruleMatches(rule.pattern, url)) continue;
+        if (!best || specificity(rule.pattern) > specificity(best->pattern)) best = &rule;
+    }
+    return best ? best->spaceID : std::string{};
+}
+std::vector<std::string> BrowserModel::rulesForSpace(const std::string& spaceID) const {
+    std::vector<std::string> patterns;
+    for (const auto& rule : state.spaceRules) if (rule.spaceID == spaceID) patterns.push_back(rule.pattern);
+    return patterns;
+}
+bool BrowserModel::setSpaceRules(const std::string& spaceID, const std::vector<std::string>& patterns) {
+    if (!space(spaceID)) return false;
+    std::unordered_set<std::string> claimed;
+    for (const auto& pattern : patterns) claimed.insert(normalizedRulePattern(pattern));
+    // Saving a pattern here takes it away from any other Space.
+    state.spaceRules.erase(std::remove_if(state.spaceRules.begin(), state.spaceRules.end(), [&](const SpaceRule& rule) {
+        return rule.spaceID == spaceID || claimed.count(normalizedRulePattern(rule.pattern));
+    }), state.spaceRules.end());
+    for (const auto& pattern : patterns) state.spaceRules.push_back({pattern, spaceID});
+    sanitizeRules();
+    return true;
+}
+void BrowserModel::sanitizeRules() {
+    std::unordered_set<std::string> seen;
+    std::vector<SpaceRule> kept;
+    for (auto rule : state.spaceRules) {
+        rule.pattern = normalizedRulePattern(rule.pattern);
+        // One pattern belongs to one Space; the first claim keeps it.
+        if (rule.pattern.empty() || !space(rule.spaceID) || !seen.insert(rule.pattern).second) continue;
+        kept.push_back(std::move(rule));
+    }
+    state.spaceRules = std::move(kept);
+}
 void BrowserModel::sanitize(double now) {
     now = timestamp(now);
     if (!std::isfinite(state.idleMinutes * 60) || state.idleMinutes <= 0) state.idleMinutes = 10;
+    state.sidebarWidth = std::isfinite(state.sidebarWidth) ? std::clamp(state.sidebarWidth, 180.0, 420.0) : 210;
 
     if (state.sessions.empty()) state.sessions = {{"work", "Work"}, {"personal", "Personal"}};
     const auto sessionIDs = repairIDs(state.sessions, "session", true);
@@ -270,7 +422,12 @@ void BrowserModel::sanitize(double now) {
         if (!std::isfinite(current.lastUsed) || current.lastUsed < 0 || current.lastUsed > now) {
             current.lastUsed = now;
         }
+        if (!current.pinned) { current.pinnedURL.clear(); current.pinnedTitle.clear(); }
+        else if (current.pinnedURL.empty()) { current.pinnedURL = current.url; current.pinnedTitle = current.title; }
     }
+
+    for (auto& rule : state.spaceRules) rule.spaceID = remapped(spaceIDs, rule.spaceID);
+    sanitizeRules();
 
     for (auto& current : state.spaces) {
         current.selectedTabID = remapped(tabIDs, current.selectedTabID);

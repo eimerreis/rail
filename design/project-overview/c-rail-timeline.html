@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eimerrail — Project overview · C · Rail entry with timeline</title>
+<link rel="stylesheet" href="shell.css">
+<style>
+.page{padding:26px 32px 0;display:flex;flex-direction:column}
+.head{display:flex;align-items:flex-end;gap:16px;margin-bottom:20px}
+.head h1{font-size:22px;font-weight:650;letter-spacing:-.4px;margin:0 0 4px}
+.head p{margin:0;font-size:12px;color:var(--sub)}
+.head .tools{margin-left:auto;display:flex;gap:8px;align-items:center}
+.cols{display:grid;grid-template-columns:344px 1fr;gap:26px;min-height:0}
+h2{font-size:13px;font-weight:650;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+h2 .n{font-size:11px;font-weight:550;color:var(--sub)}
+h2 .right{margin-left:auto;font-weight:500;font-size:10.5px;color:var(--sub);display:flex;gap:12px}
+h2 .right span{display:inline-flex;align-items:center;gap:5px}
+.att{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.item{display:grid;grid-template-columns:28px 1fr;column-gap:11px;padding:12px 14px 12px 12px;border-bottom:1px solid var(--line-soft)}
+.item:last-child{border-bottom:0}
+.item.first{background:#fdf6f4}
+.sev{width:28px;height:28px;border-radius:7px;display:grid;place-items:center}
+.sev svg{width:15px;height:15px}
+.sev.crit{background:var(--crit-bg);color:var(--crit)}
+.sev.warn{background:var(--warn-bg);color:var(--warn)}
+.sev.info{background:var(--selected);color:var(--accent)}
+.item .t{font-size:12px;font-weight:600;line-height:1.35}
+.item .m{font-size:10.5px;color:var(--sub);margin-top:2px}
+.item .acts{display:flex;gap:4px;margin-top:9px;align-items:center}
+.item .btn{height:25px;font-size:10.5px;padding:0 9px}
+.item .btn .mk{margin-left:2px}
+.local{margin-top:18px}
+.lrow{display:flex;align-items:center;gap:9px;height:30px;font-size:11.5px;border-bottom:1px solid var(--line-soft)}
+.lrow:last-child{border-bottom:0}
+.lrow .p{flex:1}
+.lrow .mono{color:var(--ink)}
+.lrow.off{color:var(--sub)}
+.lrow.off .mono{color:var(--sub)}
+.lrow .open{color:var(--accent);font-size:10.5px;font-weight:550;display:flex;align-items:center;gap:4px}
+.lrow .open svg{width:11px;height:11px}
+/* Timeline */
+.tl{border:1px solid var(--line);border-radius:11px;padding:4px 16px 8px}
+.lane{display:grid;grid-template-columns:184px 1fr;height:66px;align-items:center;border-bottom:1px solid var(--line-soft)}
+.lane:last-child{border-bottom:0}
+.lane .name{font-size:12px;font-weight:650;display:flex;align-items:center;gap:7px}
+.lane .name .fav{width:15px;height:15px}
+.envs{display:flex;gap:4px;margin-top:6px}
+.e{height:19px;padding:0 6px;border-radius:5px;background:#f1f4f7;font-size:9.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;color:var(--ink);letter-spacing:.2px}
+.e .dot{width:6px;height:6px}
+.e .dot.crit{box-shadow:none}
+.track{position:relative;height:100%}
+.axis{display:grid;grid-template-columns:184px 1fr;height:30px;align-items:end;border-bottom:1px solid var(--line)}
+.axis .ticks{position:relative;height:100%}
+.tick{position:absolute;bottom:7px;transform:translateX(-50%);font-size:9.5px;color:var(--sub);white-space:nowrap}
+.tick.now{color:var(--accent);font-weight:650}
+.night{position:absolute;top:0;bottom:0;background:#f6f8fa}
+.gridline{position:absolute;top:0;bottom:0;width:1px;background:#edf1f5}
+.nowline{position:absolute;top:0;bottom:0;width:1.5px;background:var(--accent-strong);opacity:.8}
+.mid{position:absolute;left:0;right:0;top:27px;height:1px;background:#dfe6ed}
+.localbar{position:absolute;top:48px;height:4px;border-radius:2px;background:#9dbbe0}
+.span{position:absolute;top:19px;height:17px;border-radius:4px}
+.span.crit{background:rgba(217,83,63,.18);box-shadow:inset 0 0 0 1px rgba(217,83,63,.5)}
+.span.warn{background:rgba(209,145,42,.18);box-shadow:inset 0 0 0 1px rgba(209,145,42,.45)}
+.mark{position:absolute;top:27px;transform:translate(-50%,-50%);display:grid;place-items:center}
+.mark.deploy{width:10px;height:10px;transform:translate(-50%,-50%) rotate(45deg);background:var(--ok-dot);border-radius:2px;box-shadow:0 0 0 2px #fff}
+.mark.fail{width:14px;height:14px;border-radius:50%;background:var(--crit-dot);color:#fff;box-shadow:0 0 0 2px #fff}
+.mark.fail svg{width:10px;height:10px;stroke-width:2.4}
+.mark.busy{width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #fff,inset 0 0 0 2px var(--warn-dot)}
+.label{position:absolute;top:5px;font-size:9.5px;white-space:nowrap;transform:translateX(-100%);padding-right:6px}
+.label.crit{color:var(--crit);font-weight:600}
+.label.warn{color:var(--warn);font-weight:600}
+.label.sub{color:var(--sub)}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.chart{border:1px solid var(--line);border-radius:11px;padding:12px 14px 10px}
+.chart .cap{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:600}
+.chart .cap .sub{font-weight:400;color:var(--sub);font-size:10.5px}
+.chart .cap b{margin-left:auto;font-size:17px;font-weight:650;letter-spacing:-.3px}
+.chart .cap b.crit{color:var(--crit)}
+.chart .cap b.warn{color:var(--warn)}
+.chart svg{display:block;width:100%;height:70px;margin-top:6px;overflow:visible}
+.chart .x{display:flex;justify-content:space-between;font-size:9.5px;color:var(--sub);margin-top:4px}
+</style>
+</head>
+<body>
+<script src="icons.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn current" aria-label="Projects, 3 need attention"><svg class="i"><use href="#pulse"/></svg><span class="badge">3</span></button>
+    <div class="rail-sep"></div>
+    <button class="rail-btn" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn" aria-label="Settings"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="space-head">Projects<button class="icon-btn"><svg class="i"><use href="#dots"/></svg></button></div>
+    <div class="space-desc">Every project, across all Spaces.</div>
+    <div class="side-scroll">
+      <div class="rows">
+        <div class="row sel"><span class="fav" style="color:var(--accent)"><svg class="i"><use href="#pulse"/></svg></span><span class="t">Overview</span></div>
+        <div class="row"><span class="fav" style="color:var(--crit)"><svg class="i"><use href="#alert"/></svg></span><span class="t">Needs attention</span><span class="count num" style="font-size:10px;color:var(--sub)">5</span></div>
+        <div class="row"><span class="fav"><svg class="i"><use href="#laptop"/></svg></span><span class="t">Running locally</span><span class="count num" style="font-size:10px;color:var(--sub)">3</span></div>
+      </div>
+      <div class="sec">Projects<span class="count">5</span></div>
+      <div class="rows">
+        <div class="row"><span class="dot crit"></span><span class="t">Billing API</span><span class="mk">W</span></div>
+        <div class="row"><span class="dot crit"></span><span class="t">License Service</span><span class="mk">W</span></div>
+        <div class="row"><span class="dot warn"></span><span class="t">Webhook Relay</span><span class="mk">W</span></div>
+        <div class="row"><span class="dot busy"></span><span class="t">Customer Portal</span><span class="mk">W</span></div>
+        <div class="row"><span class="dot ok"></span><span class="t">Status Page</span><span class="mk p">P</span></div>
+      </div>
+      <div class="sec">Sources</div>
+      <div class="rows">
+        <div class="row"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Azure DevOps</span><span class="dot ok" style="width:6px;height:6px"></span></div>
+        <div class="row"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span><span class="t">GitHub</span><span class="dot ok" style="width:6px;height:6px"></span></div>
+        <div class="row"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span><span class="t">Application Insights</span><span class="dot ok" style="width:6px;height:6px"></span></div>
+        <div class="row"><span class="fav" style="background:#362d59;color:#fff"><svg class="i" style="width:10px;height:10px"><use href="#bug"/></svg></span><span class="t">Sentry</span><span class="dot ok" style="width:6px;height:6px"></span></div>
+        <div class="row" style="color:var(--sub)"><span class="fav"><svg class="i"><use href="#plus"/></svg></span><span class="t">Connect a source</span></div>
+      </div>
+    </div>
+    <div class="side-foot">Checks every 2 min · 14:31</div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn dim"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#pulse"/></svg><b>Projects</b></div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <div class="head">
+        <div><h1>Thursday, 29 October</h1><p>3 of 5 projects need attention. 3 local servers running.</p></div>
+        <div class="tools"><div class="seg"><span class="on">24 hours</span><span>7 days</span></div><button class="btn line"><svg class="i"><use href="#reload"/></svg>Check now</button></div>
+      </div>
+
+      <div class="cols">
+        <section>
+          <h2>Needs attention <span class="n">5</span></h2>
+          <div class="att">
+            <div class="item first"><span class="sev crit"><svg class="i"><use href="#alert"/></svg></span><div><div class="t">Failed requests at 4.2% (limit 2%)</div><div class="m">Billing API · PROD · App Insights · 18 min</div><div class="acts"><button class="btn tint">Open alert</button><button class="btn quiet">Open PROD<span class="mk i">I</span></button></div></div></div>
+            <div class="item"><span class="sev crit"><svg class="i"><use href="#x"/></svg></span><div><div class="t">INT deploy failed at integration tests</div><div class="m">License Service · release/2.14 #881 · 26 min</div><div class="acts"><button class="btn tint">Rerun failed stage</button><button class="btn quiet">View run</button></div></div></div>
+            <div class="item"><span class="sev warn"><svg class="i"><use href="#queue"/></svg></span><div><div class="t">12 messages in dead-letter queue</div><div class="m">License Service · INT · Service Bus · since 13:05</div><div class="acts"><button class="btn line">Open queue</button></div></div></div>
+            <div class="item"><span class="sev warn"><svg class="i"><use href="#bug"/></svg></span><div><div class="t">3 new issues · TimeoutError in deliver()</div><div class="m">Webhook Relay · PROD · Sentry · 27 events / h</div><div class="acts"><button class="btn line">Open issues</button></div></div></div>
+            <div class="item"><span class="sev info"><svg class="i"><use href="#approve"/></svg></span><div><div class="t">v2.31.0 is waiting for your approval</div><div class="m">Billing API · PROD release · requested 09:58</div><div class="acts"><button class="btn line">Review release</button></div></div></div>
+          </div>
+
+          <div class="local">
+            <h2>Local servers</h2>
+            <div class="lrow"><span class="dot run"></span><span class="p">Billing API</span><span class="mono">:5001</span><span class="open">Open<svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="lrow"><span class="dot run"></span><span class="p">Customer Portal</span><span class="mono">:3000</span><span class="open">Open<svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="lrow"><span class="dot run"></span><span class="p">Webhook Relay</span><span class="mono">:8080</span><span class="open">Open<svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="lrow off"><span class="dot off"></span><span class="p">License Service</span><span class="mono">:7071</span><span>not running</span></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Last 24 hours<span class="right"><span><span class="mark deploy" style="position:static;transform:rotate(45deg);width:8px;height:8px;box-shadow:none"></span>Deploy</span><span><span class="dot crit" style="box-shadow:none"></span>Failed run</span><span><span style="width:14px;height:8px;border-radius:2px;background:rgba(217,83,63,.18);box-shadow:inset 0 0 0 1px rgba(217,83,63,.5)"></span>Alert</span><span><span style="width:14px;height:4px;border-radius:2px;background:#9dbbe0"></span>Running locally</span></span></h2>
+          <div class="tl" id="tl"></div>
+          <div class="charts">
+            <div class="chart">
+              <div class="cap">Failed requests<span class="sub">Billing API · PROD</span><b class="crit num">4.2%</b></div>
+              <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                <line x1="0" y1="46" x2="300" y2="46" stroke="#d9533f" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+                <path d="M0 62 L25 61 L50 63 L75 60 L100 62 L125 61 L150 62 L175 60 L200 61 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 16 L300 70 L0 70Z" fill="#fbe6e2"/>
+                <path d="M0 62 L25 61 L50 63 L75 60 L100 62 L125 61 L150 62 L175 60 L200 61 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 16" fill="none" stroke="#b03a2c" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+                <line x1="226" y1="0" x2="226" y2="70" stroke="#273445" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="x num"><span>12:30</span><span>limit 2% · onset 14:14</span><span>14:31</span></div>
+            </div>
+            <div class="chart">
+              <div class="cap">Dead-lettered messages<span class="sub">License Service · INT</span><b class="warn num">12</b></div>
+              <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                <path d="M0 66 H112 V60 H140 V54 H168 V46 H190 V40 H214 V31 H240 V25 H262 V19 H300 V70 H0Z" fill="#fbf0d8"/>
+                <path d="M0 66 H112 V60 H140 V54 H168 V46 H190 V40 H214 V31 H240 V25 H262 V19 H300" fill="none" stroke="#d1912a" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+                <line x1="112" y1="0" x2="112" y2="70" stroke="#273445" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="x num"><span>12:30</span><span>first message 13:05</span><span>14:31</span></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="status"><span><span style="width:6px;height:6px;border-radius:50%;background:#527eb1"></span>Opens links in each project's session</span><span>Idle tabs unload after 10 min</span></div>
+  </main>
+</div>
+<script>
+// Hours since 14:32 yesterday; the window ends at "now", 14:32 today.
+const h = (hh, mm, today = true) => ((today ? 24 : 0) + hh + mm / 60) - 14 - 32 / 60;
+const pct = x => (x / 24 * 100).toFixed(3) + '%';
+const lanes = [
+  {name:'Billing API', fav:'ado', envs:[['Local','run'],['INT','ok'],['PROD','crit']],
+   local:[h(8,50),24], spans:[['crit',h(14,14),24,'alert 14:14']], marks:[['deploy',h(15,10,false)],['deploy',h(10,5)]]},
+  {name:'License Service', fav:'ado', envs:[['Local','off'],['INT','crit'],['PROD','ok']],
+   spans:[['warn',h(13,5),24,'DLQ 13:05']], marks:[['deploy',h(9,15)],['fail',h(14,6)]]},
+  {name:'Webhook Relay', fav:'gh', envs:[['Local','run'],['STG','ok'],['PROD','warn']],
+   local:[h(7,45),24], spans:[['warn',h(11,2),24,'Sentry 11:02']], marks:[['deploy',h(10,20)]]},
+  {name:'Customer Portal', fav:'ado', envs:[['Local','run'],['INT','busy'],['PROD','ok']],
+   local:[h(9,30),24], marks:[['deploy',h(16,40,false)],['busy',h(14,28)]], label:['sub',h(14,28),'deploying']},
+  {name:'Status Page', fav:'gh', envs:[['Local','off'],['PRV','ok'],['PROD','ok']],
+   marks:[['deploy',h(19,15,false)],['deploy',h(10,40)]]},
+];
+const ticks = [['18:00',h(18,0,false)],['00:00',h(0,0)],['06:00',h(6,0)],['12:00',h(12,0)]];
+const favIcon = {ado:'ado', gh:'github'};
+const bg = () => `<div class="night" style="left:${pct(h(0,0))};width:${pct(6)}"></div>` +
+  ticks.map(([,x]) => `<div class="gridline" style="left:${pct(x)}"></div>`).join('') +
+  `<div class="mid"></div><div class="nowline" style="left:calc(100% - 1px)"></div>`;
+let html = `<div class="axis"><span></span><div class="ticks">${ticks.map(([t,x]) => `<span class="tick" style="left:${pct(x)}">${t}</span>`).join('')}<span class="tick now" style="left:auto;right:-8px;transform:none">now</span></div></div>`;
+for (const l of lanes) {
+  let t = bg();
+  if (l.local) t += `<div class="localbar" style="left:${pct(l.local[0])};width:${pct(l.local[1]-l.local[0])}"></div>`;
+  for (const [k,a,b,lab] of (l.spans||[])) t += `<div class="span ${k}" style="left:${pct(a)};width:${pct(b-a)}"></div><span class="label ${k}" style="left:${pct(a)}">${lab}</span>`;
+  for (const [k,x] of l.marks) t += `<span class="mark ${k}" style="left:${pct(x)}">${k==='fail'?'<svg class="i"><use href="#x"/></svg>':''}</span>`;
+  if (l.label) t += `<span class="label ${l.label[0]}" style="left:${pct(l.label[1])};padding-right:10px">${l.label[2]}</span>`;
+  html += `<div class="lane"><div><div class="name"><span class="fav ${l.fav}"><svg class="i"><use href="#${favIcon[l.fav]}"/></svg></span>${l.name}</div>
+    <div class="envs">${l.envs.map(([n,s]) => `<span class="e"><span class="dot ${s}"></span>${n}</span>`).join('')}</div></div>
+    <div class="track">${t}</div></div>`;
+}
+document.getElementById('tl').innerHTML = html;
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@
 - (BOOL)isHandlingSendEvent { return self.handlingSendEvent; }
 - (void)sendEvent:(NSEvent *)event {
   CefScopedSendingEvent scope;
-  if (event.type==NSEventTypeKeyDown && [self.browserController handleShortcut:event]) return;
+  if ((event.type==NSEventTypeKeyDown || event.type==NSEventTypeFlagsChanged) && [self.browserController handleShortcut:event]) return;
   [super sendEvent:event];
 }
 - (void)terminate:(id)sender { [self.browserController quit:sender]; }
@@ -30,6 +30,7 @@
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)application hasVisibleWindows:(BOOL)flag {
   (void)application; (void)flag; [self.controller.window makeKeyAndOrderFront:nil]; return YES;
 }
+- (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)urls { (void)application; [self.controller openExternalURLs:urls]; }
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication *)app { (void)app; return YES; }
 @end
 

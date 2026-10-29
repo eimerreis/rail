@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1c1e"/><stop offset="1" stop-color="#050505"/></linearGradient>
+  <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <filter id="drop" x="-10%" y="-10%" width="120%" height="125%"><feGaussianBlur stdDeviation="14"/><feOffset dy="10"/><feComponentTransfer><feFuncA type="linear" slope=".35"/></feComponentTransfer></filter>
+  <clipPath id="clip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  <linearGradient id="car" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9b9be"/></linearGradient>
+  <filter id="glow" x="-100%" y="-50%" width="300%" height="200%"><feGaussianBlur stdDeviation="30"/></filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="#000" filter="url(#drop)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+<rect x="452" y="214" width="120" height="596" rx="60" fill="#000" stroke="#303034" stroke-width="4"/>
+<rect x="470" y="232" width="84" height="250" rx="42" fill="#fff" opacity=".35" filter="url(#glow)"/>
+<rect x="470" y="232" width="84" height="250" rx="42" fill="url(#car)"/>
+<rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#rimg)" stroke-width="3"/>
+</svg>
