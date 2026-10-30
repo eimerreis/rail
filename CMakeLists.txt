@@ -8,8 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 option(EIMERRAIL_BUILD_APP "Build the native macOS browser and CEF helpers" ON)
 set(EIMERRAIL_SIGN_IDENTITY "-" CACHE STRING "Local macOS signing identity; '-' uses ad-hoc signing")
+# Client ID of the Eimerrail GitHub App (device flow enabled). Can also be set later with
+# `defaults write de.eimerreis.eimerrail GitHubClientID <id>`.
+set(EIMERRAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Eimerrail GitHub App")
 
-add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp)
+add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp)
 target_include_directories(BrowserModel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 if(BUILD_TESTING)
   add_executable(BrowserModelTests tests/BrowserModelTests.cpp)
@@ -18,6 +21,9 @@ if(BUILD_TESTING)
   add_executable(HistoryTests tests/HistoryTests.cpp)
   target_link_libraries(HistoryTests PRIVATE BrowserModel)
   add_test(NAME HistoryTests COMMAND HistoryTests)
+  add_executable(ProjectsTests tests/ProjectsTests.cpp)
+  target_link_libraries(ProjectsTests PRIVATE BrowserModel)
+  add_test(NAME ProjectsTests COMMAND ProjectsTests)
   if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/StateStoreTests.mm")
     enable_language(OBJCXX)
     add_executable(StateStoreTests tests/StateStoreTests.mm src/StateStore.mm)
@@ -62,13 +68,16 @@ add_executable(Eimerrail MACOSX_BUNDLE
   src/CEFBridge.mm
   src/NativeViews.mm
   src/StateStore.mm
+  src/ProjectStatus.mm
+  src/ProjectsView.mm
+  src/Keychain.mm
 )
 SET_EXECUTABLE_TARGET_PROPERTIES(Eimerrail)
 target_include_directories(Eimerrail PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_options(Eimerrail PRIVATE
   "$<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS};${CEF_CXX_COMPILER_FLAGS};-fobjc-arc>"
 )
-target_link_libraries(Eimerrail PRIVATE BrowserModel libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+target_link_libraries(Eimerrail PRIVATE BrowserModel libcef_dll_wrapper ${CEF_STANDARD_LIBS} "-framework Network" "-framework Security")
 set_target_properties(Eimerrail PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
   MACOSX_BUNDLE_BUNDLE_NAME Eimerrail

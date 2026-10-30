@@ -1,6 +1,6 @@
 # Projects: data model and entry paths
 
-Status: proposed, decisions confirmed 2026-10-29. UI direction: `design/project-overview/a-space-home.png` (Variant A, Space home); surface brief in `design/.impeccable/surfaces/`.
+Status: implemented 2026-10-29 (Parts A–C). GitHub needs the GitHub App client ID before its sign-in works. UI direction: `design/project-overview/a-space-home.png` (Variant A, Space home); surface brief in `design/.impeccable/surfaces/`.
 
 ## Goal
 
@@ -274,7 +274,7 @@ Conclusion: Azure DevOps through the session works as specified. The "Repo link 
 
 ## Open
 
-- The Space home is a "<Space> home" row above the tabs (see mockup). It is a selectable entry, not a tab. How it is persisted next to `Space.selectedTabID` is still to be decided.
+- The Space home is a "<Space> home" row above the tabs. It is not a tab and is not saved: selecting a tab or another Space leaves it, so a Space reopens on its last used tab.
 - History stays as it is for v1: import suggestions say "recently visited" without naming an account. Recording the Space and session per visit can be added later if the suggestions turn out to be confusing.
 - v2: App Insights alerts and Sentry issues as additional providers (App Insights could use the same session approach for the Azure portal login, to be checked), deployed versions per environment (Azure DevOps environments API), and suggestions for unattached `localhost` tabs.
 - Step 2: the project detail page.

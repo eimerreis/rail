@@ -57,6 +57,12 @@ int main(int argc, char *argv[]) {
       NSLog(@"Eimerrail cannot resolve its data folder."); return 1;
     }
     close(descriptor); directory=[NSFileManager.defaultManager stringWithFileSystemRepresentation:canonical length:strlen(canonical)];
+    // Keep the reason for an uncaught exception; macOS crash reports lose it when AppKit rethrows.
+    static NSString *crashLog=nil; crashLog=[[directory stringByAppendingPathComponent:@"crash.log"] copy];
+    NSSetUncaughtExceptionHandler([](NSException *exception) {
+      NSString *text=[NSString stringWithFormat:@"%@\n%@: %@\n%@\n",NSDate.date,exception.name,exception.reason,[exception.callStackSymbols componentsJoinedByString:@"\n"]];
+      [text writeToFile:crashLog atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    });
     BrowserController *controller=[[BrowserController alloc] initWithDataDirectory:directory automation:command->HasSwitch("automation")];
     EimerrailDelegate *delegate=[[EimerrailDelegate alloc] init]; delegate.controller=controller;
     NSApp.delegate=delegate; ((EimerrailApplication *)NSApp).browserController=controller;

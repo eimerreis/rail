@@ -35,9 +35,14 @@ The selection stays in the local CMake cache. This workspace is already configur
 | Reload | **⌘ R** |
 | Back / forward | **⌘ [** / **⌘ ]** |
 | Find in page | **⌘ F** |
+| Open Chromium DevTools for the current page | **⌥ ⌘ I** or View → Developer Tools |
+| Inspect a page element | Right-click the page → Inspect Element |
 | Select a tab in the current Space | **⌘ 1–9** |
 | Switch to recently used tabs | Hold **⌃** and press **Tab** (**⇧** to go back); release **⌃** to switch |
 | Pin or unpin a tab | Drag it into or out of **Pinned**, or right-click it |
+| Rename a pinned tab | Double-click it, or right-click → Rename Tab… (empty name restores the page title) |
+| Zoom the window | Double-click the top bar (follows the title bar setting in Desktop & Dock) |
+| See recent downloads | Downloads button beside the session picker; click a file to open it, the magnifier to show it in Finder |
 | Unload or move a tab | Right-click the tab |
 | Change the current tab's session | Toolbar session picker or tab badge |
 | Create a reusable session | Session picker → New session |
@@ -45,10 +50,16 @@ The selection stays in the local CMake cache. This workspace is already configur
 | Rename Space / set its default session | Ellipsis beside the Space name |
 | Send matching links to a Space | Ellipsis beside the Space name → Open Links in This Space |
 | Change idle timeout | Settings button or **⌘ ,** |
+| Show the Space's projects | **<Space> home** at the top of the sidebar, or **⌘ ⇧ H** |
+| Add a project | Space home → Add project, or File → Add Current Page as Project on a repo page |
+| Add a tab to a project as Local / INT / PROD / link | Right-click the tab → Add to Project |
+| Add environments and links, rename, move, remove | **…** on a project card |
 
 Work and Personal are reusable named sessions. Tabs in the same named session share cookies and site storage, even across Spaces. **Isolated** gives that tab a separate, persistent profile. It keeps its login after unloading and restarting; it is not an incognito mode. Changing sessions reloads the current URL in the chosen profile.
 
-Pinned tabs remember the page they were pinned on. Closing a pinned tab (**⌘ W**) keeps it pinned, unloads it and returns it to that page, as in Arc.
+Downloads save straight to your Downloads folder without asking; a taken name gets a number such as `report (1).pdf`. The last 20 stay listed across restarts.
+
+Pinned tabs remember the page they were pinned on and keep a name you give them until they are unpinned. Closing a pinned tab (**⌘ W**) keeps it pinned, unloads it and returns it to that page, as in Arc.
 
 Spaces organize tabs independently of sessions. A Space's default session applies to new tabs. Its existing tabs keep their current sessions.
 
@@ -58,11 +69,28 @@ After **10 minutes** out of selection, a tab's actual CEF browser is closed. The
 
 This releases the page; it does **not** make the entire browser or shared Chromium/profile resources consume zero memory. Only title, URL, pin/session/Space identity are restored. Page JavaScript state, scroll position and unsaved input are not serialized. A page with an unload confirmation can ask to stay open.
 
+## Projects
+
+Each Space has a **home** with one card per project. A project groups a repository, its pipelines, the places it runs (Local, INT, PROD…) and any links you want one click away, such as feature flags or dashboards. Every button opens in its own session; an environment can have **its own isolated profile**, which keeps, for example, a separate PROD login. Opening an environment reuses a tab in this Space that already shows it. A Space still reopens on its last used tab; the home is one click away.
+
+While a Space home is open, Eimerrail checks its projects: local addresses by connecting to their port, remote ones with a request that carries no cookies (every 60 seconds), pipelines and open pull requests every two minutes, and everything on **Check now**. Cards that need attention come first: an environment that is down or slow, a failed pipeline on the default branch, or a missing sign-in. Nothing is checked for Spaces you aren't looking at.
+
+**Azure DevOps** needs no setup. Requests run in the session of the project's Repo link and use the login you already have there; the app never reads or stores the cookies. They are limited to read-only Azure DevOps API requests. If that session isn't signed in, the card offers to open Azure DevOps there.
+
+**GitHub** uses a personal GitHub App and its device sign-in. Set it up once:
+
+1. GitHub → Settings → Developer settings → GitHub Apps → New GitHub App. Disable the webhook, select **Enable Device Flow**, and give it read-only repository permissions for **Metadata**, **Actions** and **Pull requests**.
+2. Install it on your account and on each organization with **All repositories**, so new repositories are covered without granting access again.
+3. Copy its **Client ID** and either build with `./scripts/build.sh -DEIMERRAIL_GITHUB_CLIENT_ID=<id>` or run `defaults write de.eimerreis.eimerrail GitHubClientID <id>`.
+
+The first time a card or import needs GitHub, Eimerrail copies a code to the clipboard and opens GitHub's authorization page in that project's session. Tokens are stored in the Keychain (`Eimerrail Connections`) and refreshed automatically; you sign in again only after about six months without use or if you revoke the app.
+
 ## Saved data
 
 `~/Library/Application Support/Eimerrail/` contains:
 
 - `state.json`: tabs, Spaces, sessions and preferences; saved atomically.
+- `projects.json`: projects, environments, links and provider connections, without any tokens. An unreadable file gets a recovery copy before anything is saved over it.
 - `Chromium/`: separate persistent profiles for named and isolated sessions.
 - `cef.log`: Chromium warnings/errors.
 
@@ -73,6 +101,8 @@ Startup loads only the selected page. Other tabs remain unloaded until selected.
 ```sh
 ./scripts/build.sh             # Release build, bundle signatures, model + persistence tests
 node scripts/smoke-test.mjs     # Node 22+: actual native app + Chromium integration checks
+node scripts/devtools-smoke.mjs # DevTools opening, reuse, closing and lifecycle
+node scripts/projects-smoke.mjs # Space home, health checks, sign-in states, opening environments
 ```
 
 The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. It never opens your normal browser profile. The control channel and remote debugging are enabled only by explicit test arguments.
@@ -96,6 +126,9 @@ The C++ model can also be tested without CEF:
 ## Source map
 
 - `src/BrowserModel.*` — tab, Space and session state; idle policy.
+- `src/Projects.*` — projects, environments, links, connections, repository recognition, attention rules.
+- `src/ProjectStatus.mm` — health checks, Azure DevOps through a session, GitHub device sign-in and API.
+- `src/ProjectsView.mm` — the Space home and project cards.
 - `src/BrowserController.mm` — native shell and browser lifecycle.
 - `src/CEFBridge.mm` — Chromium callbacks, navigation, permissions and downloads.
 - `src/StateStore.mm` — layout persistence and recovery.

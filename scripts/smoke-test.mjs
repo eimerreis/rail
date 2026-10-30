@@ -2,7 +2,7 @@
 // Real CEF integration tests. Uses only disposable profiles and a localhost fixture.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { openSync, closeSync } from 'node:fs';
@@ -156,6 +156,14 @@ try {
   await until('close tab removes it', async () => !(await state()).tabs.some(t => t.id === isolatedB.id));
   assert.equal((await state()).activeTab, workA.id);
   passed('native CMD+S and background tab close preserve selection');
+  const address = () => JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', resolve(profile, 'address.plist')]));
+  await command('shortcut', { key: 'l' }); await pause(200);
+  await command('keys', { text: '127.0.0' });
+  let field = address();
+  assert.ok(field.text.startsWith('127.0.0.1:') && !field.selection.endsWith(', 0}'), `history should be completed inline and selected: ${JSON.stringify(field)}`);
+  await command('keys', { text: 'Z' });
+  assert.equal(address().text, '127.0.0Z', 'typing over an inline completion should replace it');
+  passed('typing replaces the address bar inline completion, as in Chrome');
   await command('select', { tab: isolatedA.id });
   await stop(); passed('CEF closes all browser views and exits cleanly');
   s = await start();

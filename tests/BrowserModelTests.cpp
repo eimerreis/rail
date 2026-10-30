@@ -219,6 +219,32 @@ void closingPinnedTabResetsItToItsPinnedPage() {
     require(model.setPinned(pinned, false) && model.tab(pinned)->pinnedURL.empty(), "unpinning should forget the pinned page");
 }
 
+void renamedPinnedTabKeepsItsName() {
+    rail::BrowserModel model;
+    const auto id = model.state.activeTabID;
+    model.tab(id)->title = "Inbox (3)";
+    require(!model.renameTab(id, "Mail"), "only pinned tabs can be renamed");
+    require(model.setPinned(id, true), "tab should pin");
+    require(model.renameTab(id, "  Mail \n") && model.tab(id)->shownTitle() == "Mail", "renamed pinned tab should show the trimmed name");
+    model.tab(id)->title = "Inbox (4)";
+    require(model.tab(id)->shownTitle() == "Mail", "page title changes should not replace the name");
+    model.tab(id)->url = "https://mail.example.com/message/42";
+    require(model.closeTab(id, 10) && model.tab(id)->shownTitle() == "Mail", "closing a pinned tab should keep its name");
+    require(model.renameTab(id, " ") && model.tab(id)->shownTitle() == model.tab(id)->title, "a blank name should restore the page title");
+    require(model.renameTab(id, "Mail") && model.setPinned(id, false) && model.tab(id)->customTitle.empty(), "unpinning should forget the name");
+    require(!model.renameTab("missing", "x"), "missing tab should be rejected");
+}
+
+void controlSizeFallsBackToSmall() {
+    rail::BrowserModel model;
+    require(model.state.controlSize == "small", "new layouts should use the small size");
+    model.state.controlSize = "huge";
+    model.sanitize(10);
+    require(model.state.controlSize == "small", "unknown sizes should fall back to small");
+    require(rail::BrowserModel::controlScale("small") == 1, "small keeps the original size");
+    require(rail::BrowserModel::controlScale("normal") > 1 && rail::BrowserModel::controlScale("large") > rail::BrowserModel::controlScale("normal"), "sizes should grow");
+}
+
 void closedTabsCanBeReopened() {
     rail::BrowserModel model;
     const auto first = model.state.activeTabID;
@@ -485,6 +511,8 @@ int main(int argc, char** argv) {
         {"add-space", spacesCanBeCreatedWithInitialTabs},
         {"close-last", closingLastTabCreatesSelectedBlank},
         {"close-pinned", closingPinnedTabResetsItToItsPinnedPage},
+        {"rename-pinned", renamedPinnedTabKeepsItsName},
+        {"control-size", controlSizeFallsBackToSmall},
         {"reopen", closedTabsCanBeReopened},
         {"close-background", closingBackgroundTabPreservesSelection},
         {"move", movingTabsPreservesIdentity},

@@ -15,6 +15,8 @@ struct Space {
     std::string name;
     std::string sessionID;
     std::string selectedTabID;
+    // SF Symbol shown in the rail; empty falls back to one picked by position.
+    std::string icon;
 };
 
 struct Tab {
@@ -28,6 +30,9 @@ struct Tab {
     // The page a pinned tab returns to when it is closed, as in Arc.
     std::string pinnedURL;
     std::string pinnedTitle;
+    // A name the user gave a pinned tab; it replaces the page title until the tab is unpinned.
+    std::string customTitle;
+    const std::string& shownTitle() const { return customTitle.empty() ? title : customTitle; }
 };
 
 // Links whose address matches pattern open in spaceID. Patterns are globs over
@@ -47,6 +52,8 @@ struct State {
     double idleMinutes = 10;
     bool sidebarVisible = true;
     double sidebarWidth = 210;
+    // Size of the sidebar, Spaces rail and Space home: small, normal or large.
+    std::string controlSize = "small";
 };
 
 // What closing a tab changed, so it can be undone. Kept only for this run of the app.
@@ -61,6 +68,9 @@ class BrowserModel {
 public:
     State state;
     std::vector<ClosedTab> closedTabs;
+    // Isolated profiles owned by project environments and links. Tabs opened from a
+    // project may use them; set before sanitize so those tabs keep their profile.
+    std::vector<std::string> projectProfiles;
 
     BrowserModel();
     Tab* tab(const std::string& id);
@@ -79,6 +89,8 @@ public:
     bool setIsolated(const std::string& tabID);
     bool togglePin(const std::string& id);
     bool setPinned(const std::string& id, bool pinned);
+    // Names a pinned tab; a blank name goes back to the page title.
+    bool renameTab(const std::string& id, const std::string& name);
     bool moveTab(const std::string& tabID, const std::string& targetSpaceID, double now);
     std::string addSpace(const std::string& name, const std::string& sessionID, double now);
     std::string addSession(const std::string& name);
@@ -91,7 +103,11 @@ public:
     static std::string normalizedRulePattern(const std::string& pattern);
     static bool ruleMatches(const std::string& pattern, const std::string& url);
     void sanitize(double now);
+    // A named session, the tab's own isolated profile, or a project-owned profile.
+    bool sessionAllowed(const std::string& tabID, const std::string& sessionID) const;
     static bool isIsolatedSession(const std::string& id);
+    // How much larger than small the sidebar and Space home are drawn.
+    static double controlScale(const std::string& controlSize);
     static std::string isolatedSessionID(const std::string& tabID);
 
 private:

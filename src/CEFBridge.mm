@@ -1,9 +1,17 @@
 #import "CEFBridge.h"
 #include "include/cef_parser.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/wrapper/cef_helpers.h"
 
 namespace {
 NSString *S(const CefString &s) { return [NSString stringWithUTF8String:s.ToString().c_str()] ?: @""; }
+
+// DevTools owns its native window and must never send tab lifecycle callbacks.
+class DevToolsClient final : public CefClient {
+ private:
+  IMPLEMENT_REFCOUNTING(DevToolsClient);
+};
+constexpr int InspectElementCommand = MENU_ID_USER_FIRST;
 
 class RailApp final : public CefApp, public CefBrowserProcessHandler {
  public:
@@ -17,7 +25,8 @@ class RailApp final : public CefApp, public CefBrowserProcessHandler {
 
 class RailClient final : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler,
   public CefLoadHandler, public CefRequestHandler, public CefKeyboardHandler,
-  public CefPermissionHandler, public CefDownloadHandler, public CefJSDialogHandler {
+  public CefPermissionHandler, public CefDownloadHandler, public CefJSDialogHandler,
+  public CefContextMenuHandler {
  public:
   RailClient(BrowserController *controller, std::string tabID, uint64_t generation)
       : controller_(controller), tabID_(std::move(tabID)), generation_(generation) {}
@@ -29,6 +38,21 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+  void OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+      CefRefPtr<CefContextMenuParams>, CefRefPtr<CefMenuModel> menu) override {
+    CEF_REQUIRE_UI_THREAD();
+    if (menu->GetCount()) menu->AddSeparator();
+    menu->AddItem(InspectElementCommand, "Inspect Element");
+  }
+  bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
+      CefRefPtr<CefContextMenuParams> params, int commandID, EventFlags) override {
+    CEF_REQUIRE_UI_THREAD();
+    if (commandID != InspectElementCommand) return false;
+    ShowRailDevTools(browser, CefPoint(params->GetXCoord(), params->GetYCoord()));
+    return true;
+  }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD(); [controller_ browserCreated:browser tab:tabID_ generation:generation_];
@@ -125,18 +149,16 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       callback->Continue(result == NSAlertSecondButtonReturn ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
     }]; return true;
   }
-  bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>, const CefString &name,
+  bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString &name,
       CefRefPtr<CefBeforeDownloadCallback> callback) override {
+    // Files go straight to Downloads, as in Arc; the toolbar's downloads button lists them.
     BrowserController *controller = controller_; if (!controller) return false;
-    NSSavePanel *panel = [NSSavePanel savePanel]; panel.nameFieldStringValue = S(name).lastPathComponent;
-    [panel beginSheetModalForWindow:controller.window completionHandler:^(NSModalResponse result) {
-      if (result == NSModalResponseOK) callback->Continue(panel.URL.path.UTF8String, false);
-    }]; return true;
+    NSString *path = [controller downloadPathForName:S(name) download:item->GetId()];
+    if (!path) return false;
+    callback->Continue(path.UTF8String, false); return true;
   }
-  void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
-    if (item->IsComplete()) [controller_ setStatus:[NSString stringWithFormat:@"Downloaded %@",S(item->GetFullPath()).lastPathComponent]];
-    else if (item->IsInProgress()) [controller_ setStatus:[NSString stringWithFormat:@"Downloading %@ · %d%%",S(item->GetSuggestedFileName()),item->GetPercentComplete()]];
-    else if (item->IsCanceled()) [controller_ setStatus:@"Download canceled."];
+  void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> callback) override {
+    [controller_ downloadUpdated:item callback:callback];
   }
  private:
   __weak BrowserController *controller_;
@@ -144,6 +166,16 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   uint64_t generation_;
   IMPLEMENT_REFCOUNTING(RailClient);
 };
+}
+void ShowRailDevTools(CefRefPtr<CefBrowser> browser, const CefPoint &inspectAt) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!browser || !browser->IsValid()) return;
+  CefWindowInfo info;
+  info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
+  info.bounds=CefRect(0,0,1100,750);
+  CefString(&info.window_name)="Eimerrail DevTools";
+  CefBrowserSettings settings;
+  browser->GetHost()->ShowDevTools(info,new DevToolsClient,settings,inspectAt);
 }
 bool RailNavigationAllowed(const CefString &url) {
   NSString *address = S(url);

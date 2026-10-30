@@ -132,9 +132,9 @@ std::string remapped(const IDMap& ids, const std::string& id) {
 
 BrowserModel::BrowserModel() {
     state.sessions = {{"work", "Work"}, {"personal", "Personal"}};
-    state.spaces = {{"work", "Work", "work", ""},
-                    {"personal", "Personal", "personal", ""},
-                    {"research", "Research", "work", ""}};
+    state.spaces = {{"work", "Work", "work", "", "briefcase"},
+                    {"personal", "Personal", "personal", "", "house"},
+                    {"research", "Research", "work", "", "book"}};
     for (auto& current : state.spaces) {
         current.selectedTabID = uniqueID("tab");
         state.tabs.push_back({current.selectedTabID, current.id, current.sessionID,
@@ -153,9 +153,9 @@ std::string BrowserModel::addTab(const std::string& spaceID, const std::string& 
                                  double now, const std::string& sessionID) {
     const auto* owner = space(spaceID);
     if (!owner) return {};
-    const auto identity = session(sessionID) ? sessionID : owner->sessionID;
     std::string id;
     do { id = uniqueID("tab"); } while (tab(id));
+    const auto identity = sessionAllowed(id, sessionID) ? sessionID : owner->sessionID;
     state.tabs.push_back({id, owner->id, identity, "New Tab", nameOr(url, "about:blank"), false, timestamp(now)});
     selectTab(id, now);
     return id;
@@ -247,7 +247,7 @@ std::string BrowserModel::reopenClosedTab(double now) {
         closedTabs.pop_back();
         Tab restored = record.tab;
         if (!space(restored.spaceID)) restored.spaceID = state.activeSpaceID;
-        if (!space(restored.spaceID) || (!session(restored.sessionID) && restored.sessionID != isolatedSessionID(restored.id))) {
+        if (!space(restored.spaceID) || !sessionAllowed(restored.id, restored.sessionID)) {
             restored.sessionID = space(restored.spaceID) ? space(restored.spaceID)->sessionID : "";
         }
         if (!space(restored.spaceID)) continue;
@@ -273,13 +273,18 @@ std::string BrowserModel::reopenClosedTab(double now) {
 }
 bool BrowserModel::setSession(const std::string& tabID, const std::string& sessionID) {
     auto* current = tab(tabID);
-    if (!current || (!session(sessionID) && sessionID != isolatedSessionID(current->id))) return false;
+    if (!current || !sessionAllowed(tabID, sessionID)) return false;
     current->sessionID = sessionID;
     return true;
 }
 
 bool BrowserModel::setIsolated(const std::string& tabID) {
     return setSession(tabID, isolatedSessionID(tabID));
+}
+double BrowserModel::controlScale(const std::string& controlSize) {
+    if (controlSize == "large") return 1.3;
+    if (controlSize == "normal") return 1.15;
+    return 1;
 }
 bool BrowserModel::togglePin(const std::string& id) {
     const auto* current = tab(id);
@@ -289,8 +294,15 @@ bool BrowserModel::setPinned(const std::string& id, bool pinned) {
     auto* current = tab(id);
     if (!current) return false;
     if (pinned && !current->pinned) { current->pinnedURL = current->url; current->pinnedTitle = current->title; }
-    if (!pinned) { current->pinnedURL.clear(); current->pinnedTitle.clear(); }
+    if (!pinned) { current->pinnedURL.clear(); current->pinnedTitle.clear(); current->customTitle.clear(); }
     current->pinned = pinned;
+    return true;
+}
+bool BrowserModel::renameTab(const std::string& id, const std::string& name) {
+    auto* current = tab(id);
+    if (!current || !current->pinned) return false;
+    const auto first = name.find_first_not_of(" \t\r\n");
+    current->customTitle = first == std::string::npos ? "" : name.substr(first, name.find_last_not_of(" \t\r\n") - first + 1);
     return true;
 }
 bool BrowserModel::moveTab(const std::string& tabID, const std::string& targetSpaceID, double now) {
@@ -386,6 +398,7 @@ void BrowserModel::sanitize(double now) {
     now = timestamp(now);
     if (!std::isfinite(state.idleMinutes * 60) || state.idleMinutes <= 0) state.idleMinutes = 10;
     state.sidebarWidth = std::isfinite(state.sidebarWidth) ? std::clamp(state.sidebarWidth, 180.0, 420.0) : 210;
+    if (state.controlSize != "normal" && state.controlSize != "large") state.controlSize = "small";
 
     if (state.sessions.empty()) state.sessions = {{"work", "Work"}, {"personal", "Personal"}};
     const auto sessionIDs = repairIDs(state.sessions, "session", true);
@@ -394,8 +407,8 @@ void BrowserModel::sanitize(double now) {
     if (state.spaces.empty()) {
         const auto work = session("work") ? "work" : state.sessions.front().id;
         const auto personal = session("personal") ? "personal" : work;
-        state.spaces = {{"work", "Work", work, ""}, {"personal", "Personal", personal, ""},
-                        {"research", "Research", work, ""}};
+        state.spaces = {{"work", "Work", work, "", "briefcase"}, {"personal", "Personal", personal, "", "house"},
+                        {"research", "Research", work, "", "book"}};
     }
     const auto spaceIDs = repairIDs(state.spaces, "space");
     for (auto& current : state.spaces) {
@@ -413,7 +426,7 @@ void BrowserModel::sanitize(double now) {
             current.spaceID = owner->id;
         }
         current.sessionID = remapped(sessionIDs, current.sessionID);
-        if (!session(current.sessionID)) {
+        if (!sessionAllowed(current.id, current.sessionID)) {
             current.sessionID = current.sessionID.compare(0, 9, "isolated-") == 0
                 ? isolatedSessionID(current.id) : owner->sessionID;
         }
@@ -422,7 +435,7 @@ void BrowserModel::sanitize(double now) {
         if (!std::isfinite(current.lastUsed) || current.lastUsed < 0 || current.lastUsed > now) {
             current.lastUsed = now;
         }
-        if (!current.pinned) { current.pinnedURL.clear(); current.pinnedTitle.clear(); }
+        if (!current.pinned) { current.pinnedURL.clear(); current.pinnedTitle.clear(); current.customTitle.clear(); }
         else if (current.pinnedURL.empty()) { current.pinnedURL = current.url; current.pinnedTitle = current.title; }
     }
 
@@ -443,6 +456,12 @@ void BrowserModel::sanitize(double now) {
         state.activeTabID = space(state.activeSpaceID)->selectedTabID;
     }
 }
+bool BrowserModel::sessionAllowed(const std::string& tabID, const std::string& sessionID) const {
+    if (session(sessionID) || sessionID == isolatedSessionID(tabID)) return true;
+    return isIsolatedSession(sessionID)
+        && std::find(projectProfiles.begin(), projectProfiles.end(), sessionID) != projectProfiles.end();
+}
+
 bool BrowserModel::isIsolatedSession(const std::string& id) {
     constexpr auto prefix = "isolated-";
     return id.compare(0, 9, prefix) == 0 && safeID(id.substr(9));

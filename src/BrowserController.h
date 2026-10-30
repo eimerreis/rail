@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_download_handler.h"
 
 @interface BrowserController : NSObject <NSWindowDelegate, NSTextFieldDelegate>
 @property(nonatomic, readonly) NSWindow *window;
@@ -21,4 +22,7 @@
 - (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client;
 - (void)popupAbortedFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID;
 - (void)setStatus:(NSString *)message;
+// A free path in the Downloads folder for a new download, or nil to let Chromium cancel it.
+- (NSString *)downloadPathForName:(NSString *)name download:(uint32_t)downloadID;
+- (void)downloadUpdated:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
 @end

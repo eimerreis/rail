@@ -8,6 +8,14 @@ NSImage *RailSymbol(NSString *name, CGFloat size) {
   return [image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightRegular]];
 }
 NSPasteboardType const RailTabPasteboardType = @"de.eimerreis.eimerrail.tab";
+void RailTitlebarDoubleClick(NSWindow *window) {
+  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  NSString *action = [defaults stringForKey:@"AppleActionOnDoubleClick"];
+  if (!action && [defaults boolForKey:@"AppleMiniaturizeOnDoubleClick"]) action = @"Minimize";
+  if ([action isEqualToString:@"None"]) return;
+  if ([action isEqualToString:@"Minimize"]) [window performMiniaturize:nil];
+  else [window performZoom:nil];
+}
 NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color) {
   NSTextField *field = [NSTextField labelWithString:text ?: @""];
   field.font = [NSFont systemFontOfSize:size weight:weight];
@@ -15,10 +23,42 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
   field.lineBreakMode = NSLineBreakByTruncatingTail;
   return field;
 }
-@implementation RailPanel
+@implementation RailPanel {
+  NSTrackingArea *_hoverArea;
+  BOOL _hovered;
+}
+- (void)setHovered:(BOOL)hovered { if (hovered == _hovered) return; _hovered = hovered; if (self.onHoverChange) self.onHoverChange(hovered); }
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  if (_hoverArea) [self removeTrackingArea:_hoverArea];
+  _hoverArea = nil;
+  if (!self.onHoverChange || !self.window) return;
+  _hoverArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil];
+  [self addTrackingArea:_hoverArea];
+  // A row rebuilt under a resting pointer gets no mouseEntered, so check where the pointer is now.
+  [self setHovered:self.window.isKeyWindow && NSPointInRect([self convertPoint:self.window.mouseLocationOutsideOfEventStream fromView:nil], self.visibleRect)];
+}
+- (void)mouseEntered:(NSEvent *)event { (void)event; [self setHovered:YES]; }
+- (void)mouseExited:(NSEvent *)event { (void)event; [self setHovered:NO]; }
 - (BOOL)isFlipped { return YES; }
 - (void)drawRect:(NSRect)rect { [(self.fill ?: NSColor.clearColor) setFill]; NSRectFill(NSIntersectionRect(rect,self.bounds)); }
 - (void)setFill:(NSColor *)fill { _fill = fill; self.needsDisplay = YES; }
+@synthesize contentScale = _contentScale;
+- (CGFloat)contentScale { return _contentScale > 0 ? _contentScale : 1; }
+- (void)setContentScale:(CGFloat)contentScale {
+  if (fabs(contentScale - self.contentScale) < .001) return;
+  _contentScale = contentScale; [self setFrameSize:self.frame.size]; self.needsDisplay = YES;
+}
+- (void)setFrameSize:(NSSize)size {
+  [super setFrameSize:size];
+  // Whole points inside, so scroll views never come out a fraction too short and show a scroller.
+  CGFloat scale = self.contentScale; NSSize scaled = scale == 1 ? size : NSMakeSize(floor(size.width / scale), floor(size.height / scale));
+  if (!NSEqualSizes(self.bounds.size, scaled)) [self setBoundsSize:scaled];
+}
+- (void)mouseDown:(NSEvent *)event {
+  if (event.clickCount == 2 && [self convertPoint:event.locationInWindow fromView:nil].y < self.titlebarHeight) { RailTitlebarDoubleClick(self.window); return; }
+  [super mouseDown:event];
+}
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize { [super resizeSubviewsWithOldSize:oldSize]; if (self.onResize) self.onResize(); }
 - (NSString *)draggedTab:(id<NSDraggingInfo>)info { return [info.draggingPasteboard stringForType:RailTabPasteboardType]; }
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info { return [self draggingUpdated:info]; }
@@ -42,7 +82,7 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
   if ((self = [super initWithFrame:frame])) {
     self.bordered = NO; self.bezelStyle = NSBezelStyleRegularSquare;
     self.font = [NSFont systemFontOfSize:12]; self.ink = RailColor(0x273445);
-    self.cornerRadius = 6; self.hoverFill = RailColor(0xe2e8ef); self.imageOpacity = 1;
+    self.cornerRadius = 6; self.hoverFill = RailColor(0xe2e8ef); self.imageOpacity = 1; self.progress = -1;
     self.target = self; self.action = @selector(invoke:);
     self.focusRingType = NSFocusRingTypeExterior;
   }
@@ -50,7 +90,9 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
 }
 - (BOOL)isFlipped { return YES; }
 - (void)invoke:(id)sender { (void)sender; if (self.handler) self.handler(); }
+- (void)setProgress:(CGFloat)progress { _progress = progress; self.needsDisplay = YES; }
 - (void)mouseDown:(NSEvent *)event {
+  if (event.clickCount == 2 && self.onDoubleClick) { self.onDoubleClick(); return; }
   if (!self.dragTabID.length) { [super mouseDown:event]; return; }
   // Decide between a click and a drag before handing the gesture to AppKit.
   NSPoint start = event.locationInWindow;
@@ -105,6 +147,14 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
     size = NSMakeSize(size.width * scale, size.height * scale);
     NSRect frame = NSMakeRect(start + (imageSize - size.width) / 2, (bounds.size.height - size.height) / 2, size.width, size.height);
     [image drawInRect:frame fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:self.imageOpacity * (self.enabled ? 1 : .4) respectFlipped:YES hints:nil];
+    if (self.progress >= 0) {
+      NSPoint center = NSMakePoint(NSMidX(frame), NSMidY(frame)); CGFloat radius = MAX(size.width, size.height) / 2 + 3;
+      NSBezierPath *track = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2)];
+      [RailColor(0xd4dde5) setStroke]; track.lineWidth = 2; [track stroke];
+      NSBezierPath *arc = [NSBezierPath bezierPath];
+      [arc appendBezierPathWithArcWithCenter:center radius:radius startAngle:-90 endAngle:-90 + 360 * MIN(1, self.progress) clockwise:NO];
+      [RailColor(0x3976be) setStroke]; arc.lineWidth = 2; arc.lineCapStyle = NSLineCapStyleRound; [arc stroke];
+    }
   }
   if (textWidth) {
     CGFloat h = self.font.ascender - self.font.descender + 2;
@@ -284,6 +334,78 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
     [RailColor(0x3976be) setStroke]; shape.lineWidth = 2; [shape stroke];
   } else {
     [(_hovered ? RailColor(0xe2e8ef) : RailColor(0xe9eef3)) setFill]; [shape fill];
+  }
+}
+@end
+
+@implementation RailDownloadRow
+@end
+
+static const CGFloat RailDownloadRowHeight = 46, RailDownloadInset = 6;
+
+@implementation RailDownloadList {
+  NSTrackingArea *_hoverArea;
+  NSInteger _hovered;
+}
++ (CGFloat)heightForCount:(NSUInteger)count { return count * RailDownloadRowHeight + RailDownloadInset * 2; }
+- (instancetype)initWithFrame:(NSRect)frame {
+  if ((self = [super initWithFrame:frame])) _hovered = -1;
+  return self;
+}
+- (BOOL)isFlipped { return YES; }
+- (void)setRows:(NSArray<RailDownloadRow *> *)rows { _rows = [rows copy]; self.needsDisplay = YES; }
+- (NSInteger)rowAt:(NSPoint)point {
+  NSInteger row = (NSInteger)floor((point.y - RailDownloadInset) / RailDownloadRowHeight);
+  return row >= 0 && row < (NSInteger)self.rows.count ? row : -1;
+}
+- (BOOL)accessoryAt:(NSPoint)point { return point.x > self.bounds.size.width - RailDownloadInset - 34; }
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  if (_hoverArea) [self removeTrackingArea:_hoverArea];
+  _hoverArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect owner:self userInfo:nil];
+  [self addTrackingArea:_hoverArea];
+}
+- (void)mouseMoved:(NSEvent *)event {
+  NSInteger row = [self rowAt:[self convertPoint:event.locationInWindow fromView:nil]];
+  if (row != _hovered) { _hovered = row; self.needsDisplay = YES; }
+}
+- (void)mouseExited:(NSEvent *)event { (void)event; _hovered = -1; self.needsDisplay = YES; }
+- (void)mouseDown:(NSEvent *)event {
+  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+  NSInteger row = [self rowAt:point];
+  if (row >= 0 && self.onChoose) self.onChoose(row, self.rows[row].accessorySymbol && [self accessoryAt:point]);
+}
+- (NSMenu *)menuForEvent:(NSEvent *)event {
+  NSInteger row = [self rowAt:[self convertPoint:event.locationInWindow fromView:nil]];
+  return row >= 0 && self.menuForRow ? self.menuForRow(row) : nil;
+}
+- (void)drawRect:(NSRect)dirtyRect {
+  (void)dirtyRect;
+  CGFloat width = self.bounds.size.width;
+  NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init]; style.lineBreakMode = NSLineBreakByTruncatingMiddle;
+  NSDictionary *titleAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium], NSForegroundColorAttributeName:RailColor(0x273445), NSParagraphStyleAttributeName:style};
+  NSDictionary *detailAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:11], NSForegroundColorAttributeName:RailColor(0x596879)};
+  for (NSUInteger i = 0; i < self.rows.count; i++) {
+    RailDownloadRow *item = self.rows[i];
+    NSRect row = NSMakeRect(RailDownloadInset, RailDownloadInset + i * RailDownloadRowHeight, width - RailDownloadInset * 2, RailDownloadRowHeight);
+    if ((NSInteger)i == _hovered) { [RailColor(0xe2ebf5) setFill]; [[NSBezierPath bezierPathWithRoundedRect:row xRadius:7 yRadius:7] fill]; }
+    if (item.icon) [item.icon drawInRect:NSMakeRect(NSMinX(row) + 8, NSMidY(row) - 14, 28, 28) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+    CGFloat textX = NSMinX(row) + 44, textWidth = NSWidth(row) - 44 - (item.accessorySymbol ? 36 : 10);
+    [item.title ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 7, textWidth, 17) withAttributes:titleAttrs];
+    if (item.progress >= 0) {
+      NSRect track = NSMakeRect(textX, NSMinY(row) + 27, textWidth, 3);
+      [RailColor(0xd4dde5) setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
+      track.size.width *= MIN(1, item.progress);
+      [RailColor(0x3976be) setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
+      [item.detail ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 31, textWidth, 14) withAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10], NSForegroundColorAttributeName:RailColor(0x596879)}];
+    } else {
+      [item.detail ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 25, textWidth, 15) withAttributes:detailAttrs];
+    }
+    if (item.accessorySymbol && (NSInteger)i == _hovered) {
+      NSImage *symbol = [RailSymbol(item.accessorySymbol, 13) imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailColor(0x245b96)]]];
+      NSSize size = symbol.size;
+      [symbol drawInRect:NSMakeRect(NSMaxX(row) - 22 - size.width / 2, NSMidY(row) - size.height / 2, size.width, size.height) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+    }
   }
 }
 @end
