@@ -214,3 +214,9 @@ add_custom_command(TARGET Eimerrail POST_BUILD
 )
 
 message(STATUS "CEF ${CEF_ROOT}; Chromium sandbox enabled; app: ${CEF_APP}")
+
+if(BUILD_TESTING)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME BundlePrivacyTests COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/BundlePrivacyTests.py" "${CEF_APP}")
+endif()
