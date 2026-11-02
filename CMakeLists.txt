@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 option(EIMERRAIL_BUILD_APP "Build the native macOS browser and CEF helpers" ON)
-set(EIMERRAIL_SIGN_IDENTITY "-" CACHE STRING "Local macOS signing identity; '-' uses ad-hoc signing")
+set(EIMERRAIL_SIGN_IDENTITY "AUTO" CACHE STRING "Local macOS signing identity; AUTO selects a single installed identity, '-' uses ad-hoc signing")
 # Client ID of the Eimerrail GitHub App (device flow enabled). Can also be set later with
 # `defaults write de.eimerreis.eimerrail GitHubClientID <id>`.
 set(EIMERRAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Eimerrail GitHub App")
@@ -28,6 +28,8 @@ if(BUILD_TESTING)
   target_link_libraries(ReadingTests PRIVATE BrowserModel)
   add_test(NAME ReadingTests COMMAND ReadingTests)
   if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/StateStoreTests.mm")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME ReinstallMainTests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/ReinstallMainTests.py")
     enable_language(OBJCXX)
     add_executable(StateStoreTests tests/StateStoreTests.mm src/StateStore.mm)
     target_compile_options(StateStoreTests PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
@@ -54,6 +56,13 @@ if(NOT APPLE)
   message(FATAL_ERROR "The Eimerrail app currently supports Apple Silicon macOS only.")
 endif()
 
+include(cmake/Signing.cmake)
+# Preserve the effective local identity when the in-app updater builds main.
+set(EIMERRAIL_SIGN_IDENTITY_XML "${EIMERRAIL_SIGN_IDENTITY}")
+string(REPLACE "&" "&amp;" EIMERRAIL_SIGN_IDENTITY_XML "${EIMERRAIL_SIGN_IDENTITY_XML}")
+string(REPLACE "<" "&lt;" EIMERRAIL_SIGN_IDENTITY_XML "${EIMERRAIL_SIGN_IDENTITY_XML}")
+string(REPLACE ">" "&gt;" EIMERRAIL_SIGN_IDENTITY_XML "${EIMERRAIL_SIGN_IDENTITY_XML}")
+
 enable_language(C OBJCXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_OBJCXX_STANDARD 20)
@@ -72,8 +81,21 @@ endif()
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 SET_CEF_TARGET_OUT_DIR()
 
+# Chromium reserializes cached Info.plist dictionaries for dynamic signature
+# checks. Normalize the templates so the signed bytes match that XML exactly.
+# Do this before generation to avoid rewriting already-signed bundles on configure.
+foreach(_plist IN ITEMS Info.plist.in helper-Info.plist.in)
+  configure_file("resources/${_plist}" "${CMAKE_CURRENT_BINARY_DIR}/normalized-${_plist}" COPYONLY)
+  execute_process(
+    COMMAND /usr/bin/plutil -convert xml1 "${CMAKE_CURRENT_BINARY_DIR}/normalized-${_plist}"
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+  configure_file("${CMAKE_CURRENT_BINARY_DIR}/normalized-${_plist}" "${CMAKE_CURRENT_BINARY_DIR}/${_plist}" COPYONLY)
+endforeach()
+
 add_executable(Eimerrail MACOSX_BUNDLE
   src/main.mm
+  src/AppUpdater.mm
   src/BrowserController.mm
   src/CEFBridge.mm
   src/NativeViews.mm
@@ -93,7 +115,7 @@ target_compile_options(Eimerrail PRIVATE
 )
 target_link_libraries(Eimerrail PRIVATE BrowserModel libcef_dll_wrapper ${CEF_STANDARD_LIBS} "-framework Network" "-framework Security")
 set_target_properties(Eimerrail PROPERTIES
-  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
+  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist.in"
   MACOSX_BUNDLE_BUNDLE_NAME Eimerrail
   MACOSX_BUNDLE_GUI_IDENTIFIER de.eimerreis.eimerrail
   MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
@@ -103,6 +125,8 @@ set_target_properties(Eimerrail PROPERTIES
 )
 
 set(CEF_APP "${CEF_TARGET_OUT_DIR}/Eimerrail.app")
+# Bundle the worker before signing; it is copied outside the bundle when run.
+set_property(TARGET Eimerrail APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/reinstall-main.sh")
 # The pinned minimal distribution intentionally contains only the Release engine.
 # Debug builds of our code can still load that exact engine.
 # CEF's copy macro uses ln -sf on directory symlinks. Reusing the destination
@@ -122,7 +146,7 @@ foreach(_suffix_list IN LISTS CEF_HELPER_APP_SUFFIXES)
   set(HELPER_NAME "Eimerrail Helper${_name_suffix}")
   set(HELPER_BUNDLE_ID "de.eimerreis.eimerrail.helper${_plist_suffix}")
   set(_helper_plist "${CMAKE_CURRENT_BINARY_DIR}/helper-Info${_target_suffix}.plist")
-  configure_file(resources/helper-Info.plist.in "${_helper_plist}" @ONLY)
+  configure_file("${CMAKE_CURRENT_BINARY_DIR}/helper-Info.plist.in" "${_helper_plist}" @ONLY)
 
   add_executable(${_helper_target} MACOSX_BUNDLE src/helper_mac.cc)
   SET_EXECUTABLE_TARGET_PROPERTIES(${_helper_target})
@@ -137,6 +161,7 @@ foreach(_suffix_list IN LISTS CEF_HELPER_APP_SUFFIXES)
   set_property(TARGET ${_helper_target} APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements-helper.plist"
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/helper-Info.plist.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/helper-Info.plist.in"
   )
   add_custom_command(TARGET ${_helper_target} POST_BUILD
     COMMAND /usr/bin/codesign --force --sign "${EIMERRAIL_SIGN_IDENTITY}" --timestamp=none --options runtime
@@ -167,11 +192,14 @@ endforeach()
 set_property(TARGET Eimerrail APPEND PROPERTY LINK_DEPENDS
   "${CEF_BINARY_DIR_RELEASE}/Chromium Embedded Framework.framework/Chromium Embedded Framework"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/Info.plist.in"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements.plist"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.icns"
 )
 add_custom_command(TARGET Eimerrail POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${CEF_APP}/Contents/Resources"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/reinstall-main.sh" "${CEF_APP}/Contents/Resources/reinstall-main.sh"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.icns" "${CEF_APP}/Contents/Resources/AppIcon.icns"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different

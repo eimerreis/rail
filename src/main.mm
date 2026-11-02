@@ -41,9 +41,14 @@ int main(int argc, char *argv[]) {
     [EimerrailApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     CefRefPtr<CefCommandLine> command=CefCommandLine::CreateCommandLine(); command->InitFromArgv(argc,argv);
+    BOOL automation=command->HasSwitch("automation");
+    if (automation && (!command->HasSwitch("data-dir") || command->GetSwitchValue("data-dir").empty())) {
+      NSLog(@"Automation requires an explicit disposable --data-dir."); return 1;
+    }
+    NSString *defaultDirectory=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Eimerrail"];
     NSString *directory;
     if (command->HasSwitch("data-dir")) directory=[NSString stringWithUTF8String:command->GetSwitchValue("data-dir").ToString().c_str()];
-    else directory=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Eimerrail"];
+    else directory=defaultDirectory;
     NSError *error=nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:&error]) {
       NSLog(@"Eimerrail cannot create its data folder: %@",error.localizedDescription); return 1;
@@ -57,25 +62,30 @@ int main(int argc, char *argv[]) {
       NSLog(@"Eimerrail cannot resolve its data folder."); return 1;
     }
     close(descriptor); directory=[NSFileManager.defaultManager stringWithFileSystemRepresentation:canonical length:strlen(canonical)];
+    if (automation && [directory isEqualToString:defaultDirectory.stringByResolvingSymlinksInPath]) {
+      NSLog(@"Automation cannot use the normal Eimerrail profile. Supply a disposable --data-dir."); return 1;
+    }
     // Keep the reason for an uncaught exception; macOS crash reports lose it when AppKit rethrows.
     static NSString *crashLog=nil; crashLog=[[directory stringByAppendingPathComponent:@"crash.log"] copy];
     NSSetUncaughtExceptionHandler([](NSException *exception) {
       NSString *text=[NSString stringWithFormat:@"%@\n%@: %@\n%@\n",NSDate.date,exception.name,exception.reason,[exception.callStackSymbols componentsJoinedByString:@"\n"]];
       [text writeToFile:crashLog atomically:YES encoding:NSUTF8StringEncoding error:nil];
     });
-    BrowserController *controller=[[BrowserController alloc] initWithDataDirectory:directory automation:command->HasSwitch("automation")];
+    BrowserController *controller=[[BrowserController alloc] initWithDataDirectory:directory automation:automation];
     EimerrailDelegate *delegate=[[EimerrailDelegate alloc] init]; delegate.controller=controller;
     NSApp.delegate=delegate; ((EimerrailApplication *)NSApp).browserController=controller;
     CefSettings settings;
     // CEF dynamically loads its signed framework. The helper initializes Chromium's sandbox.
     settings.no_sandbox=false;
-    CefString(&settings.keychain_service_name)="Eimerrail Safe Storage";
+    // Tests still exercise real cookie encryption, with one reusable test-only
+    // Keychain item instead of requesting access to the everyday browser's key.
+    CefString(&settings.keychain_service_name)=automation ? "Eimerrail Test Safe Storage" : "Eimerrail Safe Storage";
     CefString(&settings.keychain_account_name)="Eimerrail";
     CefString(&settings.root_cache_path)=[directory stringByAppendingPathComponent:@"Chromium"].UTF8String;
     CefString(&settings.cache_path)=[directory stringByAppendingPathComponent:@"Chromium/default"].UTF8String;
     CefString(&settings.log_file)=[directory stringByAppendingPathComponent:@"cef.log"].UTF8String;
     settings.log_severity=LOGSEVERITY_WARNING;
-    if (command->HasSwitch("automation") && command->HasSwitch("debug-port")) {
+    if (automation && command->HasSwitch("debug-port")) {
       int port=std::atoi(command->GetSwitchValue("debug-port").ToString().c_str());
       if (port>=1024 && port<=65535) settings.remote_debugging_port=port;
     }

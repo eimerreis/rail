@@ -30,6 +30,7 @@
       <key>LSItemContentTypes</key><array><string>public.html</string><string>public.xhtml</string></array>
     </dict>
   </array>
+  <key>EimerrailSigningIdentity</key><string>${EIMERRAIL_SIGN_IDENTITY_XML}</string>
   <key>EimerrailGitHubClientID</key><string>${EIMERRAIL_GITHUB_CLIENT_ID}</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>

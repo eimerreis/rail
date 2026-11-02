@@ -1,4 +1,5 @@
 #import "BrowserController.h"
+#import "AppUpdater.h"
 #import "CEFBridge.h"
 #import "NativeViews.h"
 #import "StateStore.h"
@@ -123,6 +124,7 @@ NSString *NormalizedAddress(NSString *input) {
 @end
 
 @implementation BrowserController {
+  AppUpdater *_updater;
   rail::BrowserModel _model;
   rail::Projects _projects;
   ProjectStatusService *_status;
@@ -320,9 +322,19 @@ NSString *NormalizedAddress(NSString *input) {
     }];
   }];
 }
+- (void)reinstallLatestMain:(id)sender {
+  (void)sender; if (_quitting || _automation) return;
+  if (!_updater) {
+    _updater=[[AppUpdater alloc] initWithWindow:_window];
+    __weak BrowserController *weak=self;
+    _updater.onStatus=^(NSString *message) { [weak setStatus:message]; };
+    _updater.onReady=^{ [weak quit:nil]; };
+  }
+  [_updater start];
+}
 - (void)installMenu {
   NSMenu *bar = [[NSMenu alloc] init]; NSApp.mainMenu = bar;
-  NSArray *groups = @[@[@"Eimerrail",@[@"About Eimerrail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Quit Eimerrail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Space Home",@"showHome:",@"H"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"]]];
+  NSArray *groups = @[@[@"Eimerrail",@[@"About Eimerrail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Eimerrail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Space Home",@"showHome:",@"H"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"]]];
   for (NSArray *group in groups) {
     NSMenuItem *top = [[NSMenuItem alloc] initWithTitle:group[0] action:nil keyEquivalent:@""];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:group[0]]; top.submenu = menu; [bar addItem:top];
@@ -1704,6 +1716,10 @@ static ProjectTone RunTone(const std::string &result) {
   [self newProjectWithURL:active->url session:active->sessionID];
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
+  if (item.action==@selector(reinstallLatestMain:)) {
+    item.title=_updater.running ? @"Reinstalling Latest main…" : @"Reinstall Latest main";
+    return !_quitting && !_automation && !_updater.running;
+  }
   if (item.action==@selector(showDevTools:)) return !_quitting && ((NSApp.keyWindow && NSApp.keyWindow!=_window) || (!_homeVisible && !_readingVisible && [self activeBrowser]!=nullptr));
   if (item.action==@selector(addCurrentPageAsProject:)) { const auto *active=_model.tab(_model.state.activeTabID); return active && rail::recognizeRepo(active->url); }
   return YES;
