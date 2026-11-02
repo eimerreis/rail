@@ -61,6 +61,8 @@ Downloads save straight to your Downloads folder without asking; a taken name ge
 
 Pinned tabs remember the page they were pinned on and keep a name you give them until they are unpinned. Closing a pinned tab (**⌘ W**) keeps it pinned, unloads it and returns it to that page, as in Arc.
 
+Links opened from other apps reuse a pinned tab for that page or a path below it, switching to its Space and keeping its session. For example, a pin for `https://github.com/acme/repo` also opens links to that repository's issues. The most specific pinned path wins; equivalent pins prefer the current Space, then the most recently used tab. Space rules take precedence. If no pin matches, the link opens in a new tab or the selected blank tab.
+
 Spaces organize tabs independently of sessions. A Space's default session applies to new tabs. Its existing tabs keep their current sessions.
 
 A Space can claim links by address pattern, one per line, for example `dev.azure.com/contoso/**` for a Contoso Space and `dev.azure.com/fabrikam/**` for a Fabrikam Space. Patterns match host (with port) and path, ignoring scheme, `www.`, query, fragment and case. `*` matches within one path segment, `**` matches anything; a trailing `/**` also matches the prefix itself. When several patterns match, the most specific wins. Rules apply to links from other apps, links that open a new tab (which then use the target Space's session and lose `window.opener`), and addresses typed into a new blank tab. Navigation inside an existing tab stays where it is.

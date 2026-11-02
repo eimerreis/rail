@@ -20,6 +20,8 @@ struct RuntimeTab {
   __strong NSView *container = nil;
   CloseReason closeReason = CloseReason::None;
   std::string nextSession;
+  // Navigation received while Chromium is creating or closing this tab's browser.
+  std::string pendingURL;
   std::string error;
   bool loading = false, back = false, forward = false;
 };
@@ -280,6 +282,14 @@ NSString *NormalizedAddress(NSString *input) {
   for (NSURL *link in urls) {
     NSString *scheme=link.scheme.lowercaseString;
     if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) { [self setStatus:@"Local files can't be opened yet."]; continue; }
+    const auto pinned=_model.pinnedTabForURL(C(link.absoluteString));
+    if (!pinned.empty()) {
+      // Select without waking the old page first, so an unloaded pin loads only the incoming URL.
+      _model.selectTab(pinned,Now()); _homeVisible=NO;
+      if (_model.tab(pinned)->url!=C(link.absoluteString)) [self navigateTo:link.absoluteString];
+      [self selectTabID:pinned];
+      continue;
+    }
     auto *active=_model.tab(_model.state.activeTabID);
     std::string space=_model.spaceForURL(C(link.absoluteString)); if (space.empty()) space=_model.state.activeSpaceID;
     // An empty tab is reused, as in other browsers; otherwise the link gets its own tab.
@@ -544,7 +554,10 @@ NSString *NormalizedAddress(NSString *input) {
   for (auto pending=_pendingPopups.begin();pending!=_pendingPopups.end();) { if (pending->second==tabID) pending=_pendingPopups.erase(pending); else ++pending; }
   NSView *view=(__bridge NSView *)browser->GetHost()->GetWindowHandle(); view.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
   if (it->second.closeReason!=CloseReason::None || _quitting) browser->GetHost()->CloseBrowser(_quitting);
-  else if (tabID==_model.state.activeTabID) browser->GetHost()->SetFocus(true);
+  else {
+    if (!it->second.pendingURL.empty()) { browser->GetMainFrame()->LoadURL(it->second.pendingURL); it->second.pendingURL.clear(); }
+    if (tabID==_model.state.activeTabID) browser->GetHost()->SetFocus(true);
+  }
   [self refresh];
 }
 - (void)closeRuntime:(const std::string &)tabID reason:(CloseReason)reason session:(const std::string &)session {
@@ -561,10 +574,12 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)browserClosed:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
-  CloseReason reason=it->second.closeReason; std::string nextSession=it->second.nextSession;
+  CloseReason reason=it->second.closeReason; std::string nextSession=it->second.nextSession, pendingURL=it->second.pendingURL;
+  const bool wasActive=tabID==_model.state.activeTabID;
   [it->second.container removeFromSuperview]; _runtime.erase(it);
   if (reason==CloseReason::Delete || reason==CloseReason::None) _model.closeTab(tabID,Now());
   if (reason==CloseReason::Session) { if (nextSession=="__isolated__") _model.setIsolated(tabID); else _model.setSession(tabID,nextSession); }
+  if (!pendingURL.empty()) if (auto *tab=_model.tab(tabID)) { tab->url=pendingURL; if (wasActive) _model.selectTab(tabID,Now()); }
   // Drop our context reference when its final live tab closes. Chromium may
   // still retain shared process/profile resources during asynchronous teardown.
   for (auto context=_contexts.begin();context!=_contexts.end();) {
@@ -582,6 +597,8 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)closeCancelled:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
+  if (!it->second.pendingURL.empty() && it->second.browser) if (auto *tab=_model.tab(tabID)) tab->url=it->second.browser->GetMainFrame()->GetURL().ToString();
+  it->second.pendingURL.clear();
   it->second.closeReason=CloseReason::None; it->second.nextSession.clear(); _quitting=NO;
   if (auto *tab=_model.tab(tabID)) tab->lastUsed=Now(); [self setStatus:@"Page kept open to protect unsaved changes."];
 }
@@ -1007,8 +1024,8 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   tab->url=C(url); tab->title=C([NSURLComponents componentsWithString:url].host ?: @"New Tab"); tab->lastUsed=Now();
   _editingAddress=NO; [_window makeFirstResponder:nil]; _statusMessage=nil;
   auto it=_runtime.find(tab->id);
-  if (it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None) { it->second.error.clear(); it->second.browser->GetMainFrame()->LoadURL(tab->url); it->second.browser->GetHost()->SetFocus(true); }
-  else [self ensureBrowser:tab->id];
+  if (it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None) { it->second.error.clear(); it->second.pendingURL.clear(); it->second.browser->GetMainFrame()->LoadURL(tab->url); it->second.browser->GetHost()->SetFocus(true); }
+  else { if (it!=_runtime.end()) it->second.pendingURL=tab->url; [self ensureBrowser:tab->id]; }
   [self refresh]; [self saveSoon];
 }
 - (CefRefPtr<CefBrowser>)activeBrowser { auto it=_runtime.find(_model.state.activeTabID); return it!=_runtime.end() && it->second.closeReason==CloseReason::None ? it->second.browser : nullptr; }
@@ -1724,6 +1741,12 @@ static ProjectTone RunTone(const std::string &result) {
     if ([action isEqual:@"newTab"]) { auto id=_model.addTab(_model.state.activeSpaceID,C(command[@"url"] ?: @"about:blank"),Now(),C(command[@"session"] ?: @"")); if ([command[@"isolated"] boolValue]) _model.setIsolated(id); [self selectTabID:id]; }
     else if ([action isEqual:@"select"]) [self selectTabID:tabID];
     else if ([action isEqual:@"navigate"]) [self navigateTo:command[@"url"]];
+    else if ([action isEqual:@"externalURL"]) {
+      NSArray *values=[command[@"urls"] isKindOfClass:NSArray.class] ? command[@"urls"] : @[command[@"url"] ?: @""];
+      NSMutableArray<NSURL *> *urls=[NSMutableArray array];
+      for (NSString *value in values) { NSURL *url=[NSURL URLWithString:value]; if (url) [urls addObject:url]; }
+      [self openExternalURLs:urls];
+    }
     else if ([action isEqual:@"close"]) [self closeTabID:tabID];
     else if ([action isEqual:@"session"]) [self changeSession:C(command[@"session"]) tab:tabID];
     else if ([action isEqual:@"pin"]) { _model.togglePin(tabID); [self refresh]; }

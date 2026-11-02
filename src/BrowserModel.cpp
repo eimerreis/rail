@@ -1,4 +1,5 @@
 #include "BrowserModel.h"
+#include "Projects.h"
 
 #include <algorithm>
 #include <atomic>
@@ -82,6 +83,20 @@ IDMap repairIDs(Records& records, const char* kind, bool namedSessions = false) 
 std::string lowered(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
     return value;
+}
+
+// Canonical web origin and case-sensitive path, without query, fragment or trailing slashes.
+std::string pinAddress(const std::string& url) {
+    auto origin = originOf(url);
+    if (origin.empty()) return {};
+    const std::string defaultPort = origin.compare(0, 8, "https://") == 0 ? ":443" : ":80";
+    if (origin.size() >= defaultPort.size() && origin.compare(origin.size() - defaultPort.size(), defaultPort.size(), defaultPort) == 0)
+        origin.resize(origin.size() - defaultPort.size());
+    const auto start = url.find_first_of("/?#", url.find("://") + 3);
+    auto path = start != std::string::npos && url[start] == '/' ? url.substr(start) : std::string{};
+    path = path.substr(0, path.find_first_of("?#"));
+    while (!path.empty() && path.back() == '/') path.pop_back();
+    return origin + path;
 }
 
 // Host (with port) and path, lowercased, without scheme, credentials, query, fragment or "www.".
@@ -365,6 +380,29 @@ std::string BrowserModel::spaceForURL(const std::string& url) const {
         if (!best || specificity(rule.pattern) > specificity(best->pattern)) best = &rule;
     }
     return best ? best->spaceID : std::string{};
+}
+std::string BrowserModel::pinnedTabForURL(const std::string& url) const {
+    const auto address = pinAddress(url);
+    if (address.empty()) return {};
+    const auto ruledSpace = spaceForURL(url);
+    const Tab* best = nullptr;
+    size_t bestLength = 0;
+    for (const auto& candidate : state.tabs) {
+        if (!candidate.pinned || !space(candidate.spaceID) || (!ruledSpace.empty() && candidate.spaceID != ruledSpace)) continue;
+        const auto pinned = pinAddress(candidate.pinnedURL.empty() ? candidate.url : candidate.pinnedURL);
+        if (pinned.empty() || address.compare(0, pinned.size(), pinned) != 0) continue;
+        if (address.size() > pinned.size() && address[pinned.size()] != '/') continue;
+        const bool inCurrentSpace = candidate.spaceID == state.activeSpaceID;
+        const bool bestInCurrentSpace = best && best->spaceID == state.activeSpaceID;
+        const bool preferred = best && (inCurrentSpace != bestInCurrentSpace ? inCurrentSpace
+            : candidate.lastUsed != best->lastUsed ? candidate.lastUsed > best->lastUsed : candidate.id == state.activeTabID);
+        if (!best || pinned.size() > bestLength || (pinned.size() == bestLength
+            && preferred)) {
+            best = &candidate;
+            bestLength = pinned.size();
+        }
+    }
+    return best ? best->id : std::string{};
 }
 std::vector<std::string> BrowserModel::rulesForSpace(const std::string& spaceID) const {
     std::vector<std::string> patterns;

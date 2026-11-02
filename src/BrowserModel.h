@@ -97,6 +97,8 @@ public:
     std::vector<std::string> idleTabs(double now) const;
     // The Space a rule sends url to, or "" when no rule matches.
     std::string spaceForURL(const std::string& url) const;
+    // A pin for this page or a parent path, respecting Space rules; "" if none matches.
+    std::string pinnedTabForURL(const std::string& url) const;
     std::vector<std::string> rulesForSpace(const std::string& spaceID) const;
     // Replaces the rules of one Space; blank and duplicate patterns are dropped.
     bool setSpaceRules(const std::string& spaceID, const std::vector<std::string>& patterns);

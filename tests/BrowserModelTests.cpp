@@ -325,6 +325,72 @@ void movingTabsPreservesIdentity() {
     require(model.moveTab(moved, "personal", 35), "moving within current Space should be harmless");
 }
 
+void externalLinksFindPinnedTabsAcrossSpaces() {
+    rail::BrowserModel model;
+    const auto blank = model.state.activeTabID;
+    const auto pin = model.addTab("personal", "https://mail.example.com/inbox", 10);
+    model.setPinned(pin, true);
+    model.setIsolated(pin);
+    model.renameTab(pin, "Mail");
+    // Matching uses the saved pin even after it navigates elsewhere.
+    model.tab(pin)->url = "https://login.example.com/sign-in";
+    model.selectTab(blank, 20);
+    require(model.pinnedTabForURL("https://mail.example.com/inbox/message/42?view=full#reply") == pin,
+            "external deep links should find a pin in another Space before reusing a blank tab");
+    require(model.pinnedTabForURL("https://MAIL.example.com:443/inbox/?filter=unread") == pin,
+            "host case, default ports, trailing slashes, query and fragment should not prevent a match");
+    require(model.tab(pin)->pinnedURL == "https://mail.example.com/inbox" && model.tab(pin)->customTitle == "Mail"
+                && model.tab(pin)->sessionID == rail::BrowserModel::isolatedSessionID(pin),
+            "finding a pin should preserve its home page, name and isolated session");
+    require(model.state.activeTabID == blank, "looking up a pin should not change selection");
+    for (const auto& url : {"https://mail.example.com/inbox-other", "https://mail.example.com/Inbox/42",
+                            "https://mail.example.com.evil.test/inbox", "https://other.example.com/inbox",
+                            "https://mail.example.com:8443/inbox", "http://mail.example.com/inbox",
+                            "https://login.example.com/sign-in", "about:blank", "file:///inbox"}) {
+        require(model.pinnedTabForURL(url).empty(), std::string("unrelated URLs should not reuse a pin: ") + url);
+    }
+    model.setPinned(pin, false);
+    require(model.pinnedTabForURL("https://mail.example.com/inbox").empty(), "unpinned tabs should not be reused");
+}
+
+void externalLinksPreferSpecificPinsAndTheCurrentSpace() {
+    rail::BrowserModel model;
+    const auto root = model.addTab("work", "https://github.com/", 10);
+    model.setPinned(root, true);
+    const auto repo = model.addTab("personal", "https://github.com/acme/repo/", 20);
+    model.setPinned(repo, true);
+    model.selectTab(root, 30);
+    require(model.pinnedTabForURL("https://github.com/acme/repo/issues/42") == repo,
+            "the most specific pinned path should win across Spaces");
+    require(model.pinnedTabForURL("https://github.com/acme/repo-other") == root,
+            "a pinned path should match whole segments only");
+    const auto duplicate = model.addTab("work", "https://github.com/acme/repo", 40);
+    model.setPinned(duplicate, true);
+    require(model.pinnedTabForURL("https://github.com/acme/repo/issues/42") == duplicate,
+            "equally specific pins should prefer the current Space");
+    const auto recent = model.addTab("work", "https://github.com/acme/repo", 50);
+    model.setPinned(recent, true);
+    require(model.pinnedTabForURL("https://github.com/acme/repo/issues/42") == recent,
+            "equivalent pins in the same Space should prefer the most recently used one");
+}
+
+void externalLinksRespectSpaceRulesWhenReusingPins() {
+    rail::BrowserModel model;
+    const auto work = model.addTab("work", "https://example.com/", 10);
+    model.setPinned(work, true);
+    const auto personal = model.addTab("personal", "https://example.com/", 20);
+    model.setPinned(personal, true);
+    model.setSpaceRules("work", {"example.com/**"});
+    require(model.pinnedTabForURL("https://example.com/page") == work,
+            "a Space rule should take precedence over the current Space's pin");
+    model.setSpaceRules("research", {"example.com/research/**"});
+    require(model.pinnedTabForURL("https://example.com/research/page").empty(),
+            "a rule targeting a Space without a matching pin should keep normal external-link behavior");
+    model.tab(work)->pinnedURL.clear();
+    require(model.pinnedTabForURL("https://example.com/page") == work,
+            "older pins without a saved home page should fall back to their current URL");
+}
+
 bool isSafeIdentifier(const std::string& id) {
     return !id.empty() && id.size() <= 128 && std::all_of(id.begin(), id.end(), [](unsigned char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -516,6 +582,9 @@ int main(int argc, char** argv) {
         {"reopen", closedTabsCanBeReopened},
         {"close-background", closingBackgroundTabPreservesSelection},
         {"move", movingTabsPreservesIdentity},
+        {"external-pinned", externalLinksFindPinnedTabsAcrossSpaces},
+        {"external-pinned-preference", externalLinksPreferSpecificPinsAndTheCurrentSpace},
+        {"external-pinned-rules", externalLinksRespectSpaceRulesWhenReusingPins},
         {"sanitize-empty", sanitizeRecoversEmptyState},
         {"sanitize-malformed", sanitizeRepairsMalformedReferences},
         {"sanitize-valid", sanitizePreservesValidState},
