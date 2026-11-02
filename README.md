@@ -13,16 +13,20 @@ cd ~/Github/eimerrail
 
 Rebuild and launch with `./scripts/run.sh`, or build separately with `./scripts/build.sh`. You can also open the `.app` directly or copy it to Applications. Quit a running copy before rebuilding it.
 
+To reinstall the latest source version in one step, choose **Eimerrail → Reinstall Latest main**. Rail fetches `main` from `eimerreis/eimerrail`, builds and tests it in a separate cache, then quits, replaces the running app in its current location, and reopens it. Tabs, profiles, launch arguments, the local signing identity, and the GitHub Client ID are preserved. Unsaved pages can prevent the restart; save them and retry. Your development checkout is untouched. The app folder must be writable, and the build requirements below still apply. The first run downloads the build tools and CEF; later runs reuse them. Logs and the updater checkout live in `~/Library/Caches/de.eimerreis.eimerrail/updater/`. Build failures leave the current app running and offer **Show Log**; installation failures restore the previous app and open the log.
+
 Requirements: Apple Silicon, macOS 13+, Xcode or Command Line Tools, and [uv](https://docs.astral.sh/uv/). Bootstrap installs pinned CMake/Ninja into `.tools` and downloads the official, checksum-verified CEF distribution into `vendor`. CEF/Chromium versions are pinned in `cef.lock.json`.
 
-For stable Keychain access across rebuilds, configure an existing personal signing identity once:
+Builds default to `EIMERRAIL_SIGN_IDENTITY=AUTO`. If exactly one valid code-signing identity is installed, CMake selects it and saves its fingerprint in the local build cache. This gives macOS a stable app identity, so Keychain's **Always Allow** survives rebuilds. With no identity or several identities, the build warns and falls back to ad-hoc signing. Select an identity explicitly when needed:
 
 ```sh
 security find-identity -v -p codesigning
 ./scripts/build.sh '-DEIMERRAIL_SIGN_IDENTITY=Your signing identity'
 ```
 
-The selection stays in the local CMake cache. This workspace is already configured with a personal Developer ID identity. Signing happens locally without notarization or publishing. A clean checkout defaults to ad-hoc signing (`-`); macOS may request Keychain access again after rebuilding an ad-hoc app. Eimerrail uses its own **Eimerrail Safe Storage** Keychain entry for Chromium's cookie encryption; it does not use a mock encryption key.
+For an existing build previously configured with ad-hoc signing, run `./scripts/build.sh -DEIMERRAIL_SIGN_IDENTITY=AUTO` once to select the installed certificate. `-DEIMERRAIL_SIGN_IDENTITY=-` explicitly opts into ad-hoc signing, which can require new Keychain approvals after each rebuild. Signing happens locally without notarization or publishing. When switching from ad-hoc signing to a certificate, the normal browser may need one final **Always Allow** for its existing **Eimerrail Safe Storage** entry.
+
+The build normalizes app and helper `Info.plist` templates before signing, so Chromium can validate the running processes as well as their bundles on disk.
 
 ## Use
 
@@ -111,7 +115,7 @@ node scripts/devtools-smoke.mjs # DevTools close button, shortcut/menu toggles a
 node scripts/projects-smoke.mjs # Space home, health checks, sign-in states, opening environments
 ```
 
-The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. It never opens your normal browser profile. The control channel and remote debugging are enabled only by explicit test arguments.
+The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. Automation requires an explicit data directory and refuses the normal browser profile. Tests use a separate **Eimerrail Test Safe Storage** Keychain entry, shared across test runs, with real Chromium cookie encryption. The normal browser keeps using **Eimerrail Safe Storage**. Keep the same signing certificate to retain Keychain approvals; a locked login Keychain can still require unlocking. The control channel and remote debugging are enabled only by explicit test arguments.
 
 The C++ model can also be tested without CEF:
 
@@ -143,3 +147,7 @@ The C++ model can also be tested without CEF:
 - `docs/plans/2026-10-29-native-browser.md` — implementation decisions.
 
 CEF's license and third-party credits are included in the app's Resources directory.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Bootstrap downloads CEF and Chromium separately; they keep their own licenses.
