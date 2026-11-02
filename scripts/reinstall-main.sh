@@ -57,7 +57,7 @@ if [[ ! -d "$SOURCE/.git" ]]; then
   mkdir -p "$SOURCE"
   git -C "$SOURCE" init
 fi
-git -C "$SOURCE" fetch --depth 1 https://github.com/eimerreis/eimerrail.git refs/heads/main
+git -C "$SOURCE" fetch --depth 1 https://github.com/eimerreis/rail.git refs/heads/main
 git -C "$SOURCE" checkout --detach FETCH_HEAD
 echo "Building $(git -C "$SOURCE" rev-parse HEAD)…"
 BUILD_TYPE=Release /bin/bash "$SOURCE/scripts/build.sh" \

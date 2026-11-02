@@ -8,7 +8,7 @@ import unittest
 
 
 WORKER = Path(__file__).resolve().parents[1] / "scripts/reinstall-main.sh"
-REMOTE = "https://github.com/eimerreis/eimerrail.git"
+REMOTE = "https://github.com/eimerreis/rail.git"
 
 
 class ReinstallMainTests(unittest.TestCase):
