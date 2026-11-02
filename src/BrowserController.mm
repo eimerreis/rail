@@ -4,6 +4,7 @@
 #import "StateStore.h"
 #import "ProjectStatus.h"
 #import "ProjectsView.h"
+#import "ReadingController.h"
 #include "include/cef_request_context.h"
 #include <algorithm>
 #include <unordered_map>
@@ -127,6 +128,11 @@ NSString *NormalizedAddress(NSString *input) {
   ProjectStatusService *_status;
   ProjectsHomeView *_home;
   // The Space home replaces the page area until a tab is selected; it is not saved.
+  // Reading replaces the sidebar and page area the same way, and is not saved either.
+  ReadingController *_reading;
+  BOOL _readingVisible, _readingClosed;
+  NSUInteger _shownUnread;
+  RailButton *_readerChip;
   BOOL _homeVisible, _projectsDirty, _projectsSavingAllowed, _statusRefreshQueued, _loadingRepositories;
   NSInteger _homeFilter;
   NSTimer *_statusTimer;
@@ -227,6 +233,11 @@ NSString *NormalizedAddress(NSString *input) {
   _home.onImportGitHub = ^{ [weak importFromGitHub:nil]; };
   _home.onCheckNow = ^{ [weak checkProjects:YES]; };
   _home.onFilter = ^(NSInteger filter) { BrowserController *strong = weak; if (strong) strong->_homeFilter = filter; };
+  _reading = [[ReadingController alloc] initWithDirectory:_directory host:_root]; [self wireReading];
+  _reading.reader.hidden = YES; [_root addSubview:_reading.reader];
+  _reading.sidebar.hidden = YES; [_sidebar addSubview:_reading.sidebar];
+  _readerChip = RailAction(@"Reader",nil,@"Showing this page in the reader",nil); _readerChip.centered = YES; _readerChip.font = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold]; _readerChip.ink = RailColor(0x245b96); _readerChip.normalFill = RailColor(0xd8e7f7); _readerChip.hoverFill = RailColor(0xd8e7f7); _readerChip.cornerRadius = 4; _readerChip.hidden = YES;
+  if (_reading.loadProblem && !_statusMessage) _statusMessage = _reading.loadProblem;
   _status = [[ProjectStatusService alloc] initWithContexts:^CefRefPtr<CefRequestContext>(NSString *session) { BrowserController *strong = weak; return strong ? [strong contextForSession:C(session)] : nullptr; }];
   _status.onChange = ^{ [weak statusChanged]; };
   _statusbar = [[RailPanel alloc] init]; _statusbar.fill = RailColor(0xf4f6f8); [_root addSubview:_statusbar];
@@ -250,7 +261,7 @@ NSString *NormalizedAddress(NSString *input) {
   _reload = RailAction(@"",@"arrow.clockwise",@"Reload (⌘ R)",^{ [weak reloadPage:nil]; });
   _toggle = RailAction(@"",@"sidebar.left",@"Show sidebar (⌘ S)",^{ [weak toggleSidebar:nil]; });
   for (NSView *v in @[_back,_forward,_reload,_toggle]) [_toolbar addSubview:v];
-  _addressBar = [[RailAddressBar alloc] init]; _addressBar.onFocusChange = ^(BOOL focused) { [weak addressFocusChanged:focused]; }; [_toolbar addSubview:_addressBar];
+  _addressBar = [[RailAddressBar alloc] init]; _addressBar.onFocusChange = ^(BOOL focused) { [weak addressFocusChanged:focused]; }; [_toolbar addSubview:_addressBar]; [_addressBar addSubview:_readerChip];
   _address = _addressBar.field;
   _address.placeholderString = @"Search or enter address"; _address.delegate = self; _address.target = self; _address.action = @selector(addressEntered:); _address.accessibilityLabel = @"Search or enter address";
   _downloadsButton = RailAction(@"",@"arrow.down.circle",@"Downloads",^{ [weak toggleDownloads:nil]; }); _downloadsButton.centered = YES; _downloadsButton.hidden = !_downloads.count; [_toolbar addSubview:_downloadsButton];
@@ -269,6 +280,7 @@ NSString *NormalizedAddress(NSString *input) {
   [self installMenu]; [self refresh]; [self layout];
   [_window center]; [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
   [self ensureBrowser:_model.state.activeTabID];
+  [_reading start];
   _idleTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) { (void)timer; [weak checkIdle]; }];
   _statusTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:YES block:^(NSTimer *timer) { (void)timer; BrowserController *strong = weak; if (strong && strong->_homeVisible && strong->_window.isVisible) [strong checkProjects:NO]; }];
   if (_automation) _automationTimer = [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *timer) { (void)timer; [weak processAutomation]; }];
@@ -310,7 +322,7 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)installMenu {
   NSMenu *bar = [[NSMenu alloc] init]; NSApp.mainMenu = bar;
-  NSArray *groups = @[@[@"Eimerrail",@[@"About Eimerrail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Quit Eimerrail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Space Home",@"showHome:",@"H"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"]]];
+  NSArray *groups = @[@[@"Eimerrail",@[@"About Eimerrail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Quit Eimerrail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Space Home",@"showHome:",@"H"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"]]];
   for (NSArray *group in groups) {
     NSMenuItem *top = [[NSMenuItem alloc] initWithTitle:group[0] action:nil keyEquivalent:@""];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:group[0]]; top.submenu = menu; [bar addItem:top];
@@ -328,26 +340,28 @@ NSString *NormalizedAddress(NSString *input) {
   CGFloat scale = rail::BrowserModel::controlScale(_model.state.controlSize);
   for (RailPanel *panel in @[_rail,_sidebar,_home]) panel.contentScale = scale;
   _rail.titlebarHeight = _sidebar.titlebarHeight = 51/scale;
-  CGFloat rail = _model.state.sidebarVisible ? round(45*scale) : 0, side = _model.state.sidebarVisible ? round(_model.state.sidebarWidth*scale) : 0, left = rail + side;
+  CGFloat rail = _model.state.sidebarVisible ? round(45*scale) : 0, side = _model.state.sidebarVisible ? round([self shownSidebarWidth]*scale) : 0, left = rail + side;
   _rail.hidden = !_model.state.sidebarVisible; _sidebar.hidden = !_model.state.sidebarVisible;
   _rail.frame = NSMakeRect(0,0,rail,h); _sidebar.frame = NSMakeRect(rail,0,side,h);
-  CGFloat sideH = _sidebar.bounds.size.height, railH = _rail.bounds.size.height; side = _model.state.sidebarVisible ? _model.state.sidebarWidth : 0;
-  _toolbar.frame = NSMakeRect(left,0,w-left,51); _webHost.frame = NSMakeRect(left,51,w-left,h-77); _empty.frame = NSMakeRect(left,51,w-left,h-77); _home.frame = NSMakeRect(left,51,w-left,h-77);
+  CGFloat sideH = _sidebar.bounds.size.height, railH = _rail.bounds.size.height; side = _model.state.sidebarVisible ? [self shownSidebarWidth] : 0;
+  _toolbar.frame = NSMakeRect(left,0,w-left,51); _webHost.frame = NSMakeRect(left,51,w-left,h-77); _empty.frame = NSMakeRect(left,51,w-left,h-77); _home.frame = NSMakeRect(left,51,w-left,h-77); _reading.reader.frame = NSMakeRect(left,51,w-left,h-77);
   _statusbar.frame = NSMakeRect(left,h-26,w-left,26);
   _spaceLabel.frame = NSMakeRect(15,62,side-55,23); _spaceSubtitle.frame = NSMakeRect(15,91,side-25,16);
   // Centered on the toolbar's buttons, whatever the size.
   _sidebarToggle.frame = NSMakeRect(side-39,25/scale-14,28,28); _spaceOptions.frame = NSMakeRect(side-39,61,28,28);
   _tabScroll.frame = NSMakeRect(0,117,side,MAX(0,sideH-160)); _sleepLabel.frame = NSMakeRect(13,sideH-29,side-25,17);
-  _sidebarHandle.hidden = !_model.state.sidebarVisible; _sidebarHandle.frame = NSMakeRect(left-3,0,6,h);
+  _reading.sidebar.frame = NSMakeRect(0,58,side,MAX(0,sideH-58));
+  _sidebarHandle.hidden = !_model.state.sidebarVisible || _readingVisible; _sidebarHandle.frame = NSMakeRect(left-3,0,6,h);
   CGFloat x = _model.state.sidebarVisible ? 7 : 86;
   _toggle.hidden = _model.state.sidebarVisible;
   if (!_toggle.hidden) { _toggle.frame = NSMakeRect(x,11,28,28); x += 31; }
   _back.frame = NSMakeRect(x,11,27,28); _forward.frame = NSMakeRect(x+28,11,27,28); _reload.frame = NSMakeRect(x+56,11,27,28); x += 92;
   CGFloat tw = _toolbar.bounds.size.width;
   CGFloat downloads = _downloadsButton.hidden ? 0 : 34;
-  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-133-downloads),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
+  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-(_sessionPicker.hidden && !downloads ? 10 : 133)-downloads),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
   _downloadsButton.frame = NSMakeRect(tw-157,11,28,28);
   _progress.frame = NSMakeRect(0,48,tw,3);
+  _readerChip.frame = NSMakeRect(_addressBar.bounds.size.width-58,6,52,18);
   if (!_suggestionList.hidden) { NSRect bar = [_root convertRect:_addressBar.bounds fromView:_addressBar]; _suggestionList.frame = NSMakeRect(NSMinX(bar),NSMaxY(bar)+4,NSWidth(bar),[RailSuggestionList heightForCount:_addressRows.size()]); }
   _sessionLabel.frame = NSMakeRect(13,6,155,14); _statusLabel.frame = NSMakeRect(175,6,MAX(0,tw-188),14); _statusLabel.alignment = NSTextAlignmentRight;
   CGFloat ew = _empty.bounds.size.width, ey = MAX(80,_empty.bounds.size.height*.32);
@@ -377,11 +391,12 @@ NSString *NormalizedAddress(NSString *input) {
   for (size_t index=0;index<_model.state.spaces.size();index++) {
     const auto &space = _model.state.spaces[index]; std::string sid = space.id;
     NSString *symbol = [self symbolForSpace:space index:index];
-    RailButton *button = RailAction(@"",symbol,S(space.name),^{ BrowserController *strong = weak; if (!strong) return; strong->_homeVisible = NO; strong->_model.selectSpace(sid,Now()); [strong ensureBrowser:strong->_model.state.activeTabID]; [strong refresh]; [strong saveSoon]; });
+    RailButton *button = RailAction(@"",symbol,S(space.name),^{ BrowserController *strong = weak; if (!strong) return; strong->_homeVisible = NO; strong->_readingVisible = NO; strong->_model.selectSpace(sid,Now()); [strong ensureBrowser:strong->_model.state.activeTabID]; [strong refresh]; [strong saveSoon]; });
     button.centered = YES; button.frame = NSMakeRect(6,ry,32,32); button.ink = RailColor(0x596879);
-    if (space.id == _model.state.activeSpaceID) { button.normalFill = RailColor(0x4173aa); button.hoverFill = RailColor(0x37679c); button.ink = NSColor.whiteColor; }
+    if (space.id == _model.state.activeSpaceID && !_readingVisible) { button.normalFill = RailColor(0x4173aa); button.hoverFill = RailColor(0x37679c); button.ink = NSColor.whiteColor; }
     [_rail addSubview:button]; ry += 41;
   }
+  [self addReadingEntryAt:ry];
   RailButton *addSpace = RailAction(@"",@"plus",@"New Space",^{ [weak newSpace:nil]; }); addSpace.centered = YES; addSpace.tag = 900; [_rail addSubview:addSpace];
   RailButton *settings = RailAction(@"",@"slider.horizontal.3",@"Settings",^{ [weak showSettings:nil]; }); settings.centered = YES; settings.tag = 901; [_rail addSubview:settings];
   const auto *space = _model.space(_model.state.activeSpaceID);
@@ -459,17 +474,19 @@ NSString *NormalizedAddress(NSString *input) {
     _window.title = _homeVisible ? [NSString stringWithFormat:@"%@ home — Eimerrail",space ? S(space->name) : @"Space"] : [NSString stringWithFormat:@"%@ — Eimerrail",S(active->title)];
   }
   auto slot = _runtime.find(_model.state.activeTabID);
-  _back.enabled=!_homeVisible && slot!=_runtime.end() && slot->second.back; _forward.enabled=!_homeVisible && slot!=_runtime.end() && slot->second.forward;
-  if (!_homeVisible && slot!=_runtime.end() && slot->second.loading) [_progress startAnimation:nil]; else [_progress stopAnimation:nil];
-  for (auto &[id,runtime] : _runtime) runtime.container.hidden = _homeVisible || id != _model.state.activeTabID;
+  const BOOL covered=_homeVisible || _readingVisible;
+  _back.enabled=!covered && slot!=_runtime.end() && slot->second.back; _forward.enabled=!covered && slot!=_runtime.end() && slot->second.forward;
+  if (!covered && slot!=_runtime.end() && slot->second.loading) [_progress startAnimation:nil]; else [_progress stopAnimation:nil];
+  for (auto &[id,runtime] : _runtime) runtime.container.hidden = covered || id != _model.state.activeTabID;
   BOOL error = slot!=_runtime.end() && !slot->second.error.empty();
-  _empty.hidden = _homeVisible || (active && active->url!="about:blank" && !error);
+  _empty.hidden = covered || (active && active->url!="about:blank" && !error);
   _home.hidden = !_homeVisible; if (_homeVisible) [self refreshHome];
   if (error) {
     _emptyTitle.stringValue=@"Couldn't load this page."; _emptySubtitle.stringValue=S(slot->second.error); _retry.title=@"Try again"; _retry.image=RailSymbol(@"arrow.clockwise",15); _retry.handler=^{ [weak reloadPage:nil]; };
   } else {
     _emptyTitle.stringValue=@"A little room for what's next."; _emptySubtitle.stringValue=@"Enter an address or search with ⌘ L."; _retry.title=@"Search or enter address"; _retry.image=RailSymbol(@"magnifyingglass",15); _retry.handler=^{ [weak focusAddress:nil]; };
   }
+  [self refreshReadingChrome];
   _statusLabel.stringValue = _statusMessage.length ? _statusMessage : [NSString stringWithFormat:@"Idle tabs unload after %.0f min",_model.state.idleMinutes];
   [self layout];
 }
@@ -485,11 +502,12 @@ NSString *NormalizedAddress(NSString *input) {
   for (const auto &space : _model.state.spaces) if (space.id!=tab->spaceID) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:S(space.name) action:@selector(moveTabMenu:) keyEquivalent:@""]; item.target=self; item.representedObject=@{@"tab":S(tabID),@"space":S(space.id)}; [move.submenu addItem:item]; }
   [menu addItem:move];
   if (rail::isWebURL(tab->url)) { NSMenuItem *projects=[[NSMenuItem alloc] initWithTitle:@"Add to Project" action:nil keyEquivalent:@""]; projects.submenu=[self projectMenuForTab:tabID]; [menu addItem:projects]; }
+  if (rail::isWebURL(tab->url)) { NSMenuItem *save=[[NSMenuItem alloc] initWithTitle:@"Save to Reading List" action:@selector(saveTabToReading:) keyEquivalent:@""]; save.target=self; save.representedObject=S(tabID); [menu addItem:save]; }
   return menu;
 }
 - (void)selectTabID:(const std::string &)tabID {
   if (_quitting || !_model.selectTab(tabID,Now())) return;
-  _homeVisible=NO;
+  _homeVisible=NO; _readingVisible=NO;
   _statusMessage=nil; [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
   auto it=_runtime.find(tabID); if (it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None) it->second.browser->GetHost()->SetFocus(true);
 }
@@ -587,10 +605,11 @@ NSString *NormalizedAddress(NSString *input) {
     for (const auto &[id,slot]:_runtime) { (void)slot; const auto *tab=_model.tab(id); if (tab && tab->sessionID==context->first) { used=true; break; } }
     // Status checks keep using a session's context; recreating it while one is alive would clash.
     for (const auto &connection:_projects.state.connections) if (connection.auth=="session" && connection.sessionID==context->first) used=true;
+    if ([_reading.activeSession isEqual:S(context->first)]) used=true;
     if (used) ++context; else context=_contexts.erase(context);
   }
   [self saveSoon];
-  if (_quitting) { if (_runtime.empty()) [self finishQuit]; return; }
+  if (_quitting) { if (_runtime.empty() && _readingClosed) [self finishQuit]; return; }
   // A tab selected while closing is reopened only after the old browser is fully gone.
   if (tabID==_model.state.activeTabID || reason==CloseReason::Delete || reason==CloseReason::None) [self ensureBrowser:_model.state.activeTabID];
   [self refresh];
@@ -835,7 +854,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   _saveTimer=[NSTimer scheduledTimerWithTimeInterval:.5 repeats:NO block:^(NSTimer *timer) { (void)timer; [weak saveNow]; }];
 }
 - (void)saveNow {
-  [_saveTimer invalidate]; if (!_savingAllowed) return;
+  [_saveTimer invalidate]; [_reading saveNow]; if (!_savingAllowed) return;
   NSError *error=nil; if (!rail::SaveState(_directory,_model,&error)) [self setStatus:[NSString stringWithFormat:@"Could not save the layout: %@",error.localizedDescription]];
   if (_historyDirty) { _history.prune(5000,Now()); _historyDirty=!rail::SaveHistory(_directory,_history,nil); }
   if (_downloadsDirty) _downloadsDirty=![self saveDownloads];
@@ -856,10 +875,12 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   _dropIndicator.hidden=NO; return NSDragOperationMove;
 }
 - (void)resizeSidebarTo:(CGFloat)delta { _model.state.sidebarWidth=std::clamp<double>(_dragStartWidth+delta/rail::BrowserModel::controlScale(_model.state.controlSize),180,420); [self refresh]; }
-- (void)newTab:(id)sender { (void)sender; if (_quitting) return; _homeVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now()); [self refresh]; [self saveSoon]; [self focusAddress:nil]; }
+- (void)newTab:(id)sender { (void)sender; if (_quitting) return; _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now()); [self refresh]; [self saveSoon]; [self focusAddress:nil]; }
 - (void)closeCurrentTab:(id)sender {
   (void)sender;
   if (NSApp.keyWindow && NSApp.keyWindow!=_window) { [NSApp.keyWindow performClose:nil]; return; }
+  // No tab is showing, so ⌘W leaves Reading instead of closing one out of sight.
+  if (_readingVisible) { [self showReading:nil]; return; }
   [self closeTabID:_model.state.activeTabID];
 }
 - (void)closeTabID:(const std::string &)tabID {
@@ -927,7 +948,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (focused) {
     // Show the full address while editing, like browsers do.
     const auto *active=_model.tab(_model.state.activeTabID);
-    _address.stringValue = active && active->url!="about:blank" && !_homeVisible ? S(active->url) : @"";
+    _address.stringValue = active && active->url!="about:blank" && !_homeVisible && !_readingVisible ? S(active->url) : @"";
     _addressBar.symbolName=@"magnifyingglass";
   } else { [self hideSuggestions]; [self refresh]; }
 }
@@ -1006,9 +1027,9 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)addressEntered:(id)sender { (void)sender; [self navigateTo:_address.stringValue]; }
 - (void)navigateTo:(NSString *)address {
   NSString *url=NormalizedAddress(address); if (!url) { [self setStatus:@"Enter a web address or a search. Supported addresses use http or https."]; return; }
-  if (_homeVisible) {
-    // Typing on the Space home opens a new tab instead of replacing the last page.
-    _homeVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now());
+  if (_homeVisible || _readingVisible) {
+    // Typing on the Space home or in Reading opens a new tab instead of replacing the last page.
+    _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now());
   }
   auto *tab=_model.tab(_model.state.activeTabID); if (!tab) return;
   [self hideSuggestions];
@@ -1031,13 +1052,14 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (CefRefPtr<CefBrowser>)activeBrowser { auto it=_runtime.find(_model.state.activeTabID); return it!=_runtime.end() && it->second.closeReason==CloseReason::None ? it->second.browser : nullptr; }
 - (void)goBack:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) if (browser->CanGoBack()) browser->GoBack(); }
 - (void)goForward:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) if (browser->CanGoForward()) browser->GoForward(); }
-- (void)reloadPage:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) { auto &slot=_runtime.at(_model.state.activeTabID); slot.error.clear(); browser->Reload(); [self refresh]; } else [self ensureBrowser:_model.state.activeTabID]; }
-- (void)showDevTools:(id)sender { (void)sender; if (!_homeVisible && !_quitting) ShowRailDevTools([self activeBrowser]); }
+- (void)reloadPage:(id)sender { (void)sender; if (_readingVisible) { [_reading reloadSelected]; return; } if (auto browser=[self activeBrowser]) { auto &slot=_runtime.at(_model.state.activeTabID); slot.error.clear(); browser->Reload(); [self refresh]; } else [self ensureBrowser:_model.state.activeTabID]; }
+- (void)showDevTools:(id)sender { (void)sender; if (!_homeVisible && !_readingVisible && !_quitting) ShowRailDevTools([self activeBrowser]); }
 - (void)zoomIn:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()+.5); }
 - (void)zoomOut:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()-.5); }
 - (void)zoomReset:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(0); }
 - (void)findInPage:(id)sender {
-  (void)sender; auto browser=[self activeBrowser]; if (!browser) return;
+  (void)sender; if (_readingVisible) { [_reading.reader showFind]; return; }
+  auto browser=[self activeBrowser]; if (!browser) return;
   [self askForText:@"Find in page" initial:@"" completion:^(NSString *value) { if (value.length) browser->GetHost()->Find(C(value),true,false,false); }];
 }
 - (BOOL)handleShortcut:(NSEvent *)event {
@@ -1052,6 +1074,9 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (!(flags & NSEventModifierFlagCommand)) { _undoCloseArmed=NO; return NO; }
   NSString *key=event.charactersIgnoringModifiers.lowercaseString;
   BOOL shift=(flags & NSEventModifierFlagShift)!=0;
+  if ([key isEqual:@"l"] && shift) { [self showReading:nil]; return YES; }
+  if ([key isEqual:@"d"] && shift) { [self savePageToReading:nil]; return YES; }
+  if ([key isEqual:@"v"] && !shift && _readingVisible && [self pasteIntoReading]) return YES;
   if ([key isEqual:@"i"] && (flags & NSEventModifierFlagOption) && !shift) [self showDevTools:nil];
   else if ([key isEqual:@"t"] && shift) [self reopenClosedTab:nil];
   else if ([key isEqual:@"z"] && !shift && _undoCloseArmed && !_model.closedTabs.empty()) [self reopenClosedTab:nil];
@@ -1153,6 +1178,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 }
 - (void)sessionChosen:(id)sender {
   (void)sender; NSString *value=_sessionPicker.selectedItem.representedObject; if (!value) return;
+  if (_readingVisible) { [_reading setSelectedSessionTo:value]; return; }
   if ([value isEqual:@"__new__"]) {
     __weak BrowserController *weak=self; [self askForText:@"Name a reusable session" initial:@"" completion:^(NSString *name) { BrowserController *strong=weak; if (!strong || !name.length) return; auto id=strong->_model.addSession(C(name)); [strong changeSession:id tab:strong->_model.state.activeTabID]; }]; [self refresh];
   } else [self changeSession:C(value) tab:_model.state.activeTabID];
@@ -1193,12 +1219,119 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (BOOL)windowShouldClose:(NSWindow *)sender { (void)sender; [self quit:nil]; return NO; }
 - (void)quit:(id)sender {
   (void)sender; if (_quitting) return; _quitting=YES; [self saveNow];
-  if (_runtime.empty()) { [self finishQuit]; return; }
+  // Chromium can't shut down while the reader's hidden browser is open.
+  __weak BrowserController *weak=self;
+  [_reading shutdown:^{ BrowserController *strong=weak; if (!strong) return; strong->_readingClosed=YES; if (strong->_quitting && strong->_runtime.empty()) [strong finishQuit]; }];
+  if (_runtime.empty()) { if (_readingClosed) [self finishQuit]; return; }
   std::vector<std::string> ids; for (const auto &[id,slot]:_runtime) { (void)slot; ids.push_back(id); }
   for (const auto &id:ids) [self closeRuntime:id reason:CloseReason::Quit session:""];
 }
 - (void)finishQuit { [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [self saveNow]; _contexts.clear(); [_window orderOut:nil]; CefQuitMessageLoop(); }
 - (void)dealloc { [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [_saveTimer invalidate]; _window.delegate=nil; }
+
+#pragma mark Reading
+- (CGFloat)shownSidebarWidth { return _readingVisible ? MAX(292,_model.state.sidebarWidth) : _model.state.sidebarWidth; }
+- (void)wireReading {
+  __weak BrowserController *weak=self;
+  _reading.contextForSession=^CefRefPtr<CefRequestContext>(NSString *session) { BrowserController *strong=weak; return strong ? [strong contextForSession:C(session)] : nullptr; };
+  // The Space a rule claims the address for decides its session; otherwise the Space in use does.
+  _reading.sessionForURL=^NSString *(NSString *url) {
+    BrowserController *strong=weak; if (!strong) return @"";
+    const std::string ruled=strong->_model.spaceForURL(C(url));
+    const auto *space=strong->_model.space(ruled.empty() ? strong->_model.state.activeSpaceID : ruled);
+    return space ? S(space->sessionID) : @"";
+  };
+  _reading.sessionName=^NSString *(NSString *session) { BrowserController *strong=weak; return strong ? [strong sessionName:C(session)] : @""; };
+  _reading.faviconForURL=^NSImage *(NSString *url) { BrowserController *strong=weak; return strong ? [strong faviconForURL:C(url)] : nil; };
+  _reading.storeFavicon=^(NSString *url, NSData *png) { BrowserController *strong=weak; NSString *key=FaviconKey(C(url)); if (strong && key) [strong storeFavicon:png key:key persist:YES]; };
+  _reading.openURL=^(NSString *url, NSString *session) { [weak openReadingURL:url session:session]; };
+  _reading.onStatus=^(NSString *message) {
+    [weak setStatus:message];
+    // A confirmation shouldn't still be there long after the thing it confirmed.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(6*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ BrowserController *strong=weak; if (strong && strong->_statusMessage==message) { strong->_statusMessage=nil; [strong refresh]; } });
+  };
+  _reading.onChromeChange=^{ BrowserController *strong=weak; if (strong && strong->_window) [strong refreshReadingChrome]; };
+  _reading.askForText=^(NSString *prompt, void (^completion)(NSString *)) { [weak askForText:prompt initial:@"" completion:completion]; };
+  _reading.confirm=^(NSString *title, NSString *detail, NSString *action, void (^completion)(void)) {
+    BrowserController *strong=weak; if (!strong) return;
+    NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=title; alert.informativeText=detail; [alert addButtonWithTitle:action]; [alert addButtonWithTitle:@"Cancel"];
+    [alert beginSheetModalForWindow:strong->_window completionHandler:^(NSModalResponse result) { if (result==NSAlertFirstButtonReturn) completion(); }];
+  };
+}
+- (void)showReading:(id)sender {
+  (void)sender; if (_quitting) return;
+  _readingVisible=!_readingVisible; if (_readingVisible) _homeVisible=NO;
+  _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
+  if (_readingVisible) [_reading opened];
+  [self refresh];
+  if (_readingVisible) [_reading.reader focusArticle];
+  else if (auto browser=[self activeBrowser]) browser->GetHost()->SetFocus(true); else [self ensureBrowser:_model.state.activeTabID];
+}
+- (void)addReadingEntryAt:(CGFloat)y {
+  __weak BrowserController *weak=self;
+  RailPanel *line=[[RailPanel alloc] initWithFrame:NSMakeRect(12,y+1,20,1)]; line.fill=RailColor(0xcbd5df); [_rail addSubview:line];
+  const NSUInteger unread=_reading.unreadCount;
+  RailButton *entry=RailAction(@"",@"tray",unread ? [NSString stringWithFormat:@"Reading list, %lu unread (⌘ ⇧ L)",(unsigned long)unread] : @"Reading list (⌘ ⇧ L)",^{ [weak showReading:nil]; });
+  entry.centered=YES; entry.frame=NSMakeRect(6,y+11,32,32); entry.ink=RailColor(0x596879);
+  if (_readingVisible) { entry.normalFill=RailColor(0x4173aa); entry.hoverFill=RailColor(0x37679c); entry.ink=NSColor.whiteColor; }
+  [_rail addSubview:entry];
+  if (unread) {
+    // Blue, not the red used for projects: an unread article doesn't need attention.
+    NSTextField *badge=RailLabel(unread>99 ? @"99+" : [NSString stringWithFormat:@"%lu",(unsigned long)unread],9,NSFontWeightBold,NSColor.whiteColor); badge.alignment=NSTextAlignmentCenter;
+    badge.lineBreakMode=NSLineBreakByClipping; CGFloat width=unread>99 ? 26 : unread>9 ? 20 : 15;
+    RailPanel *back=[[RailPanel alloc] initWithFrame:NSMakeRect(40-width+2,y+6,width,15)]; back.wantsLayer=YES; back.layer.cornerRadius=7.5; back.layer.borderWidth=1.5; back.layer.borderColor=RailColor(0xe2e8ef).CGColor; back.fill=RailColor(0x245b96);
+    badge.frame=NSMakeRect(0,1.5,width,12); [back addSubview:badge]; [_rail addSubview:back];
+  }
+}
+// Everything refresh shows that depends on Reading, and which Reading can change by itself.
+- (void)refreshReadingChrome {
+  const BOOL reading=_readingVisible;
+  _reading.reader.hidden=!reading; _reading.sidebar.hidden=!reading;
+  for (NSView *view in @[_spaceLabel,_spaceSubtitle,_spaceOptions,_tabScroll,_sleepLabel]) view.hidden=reading;
+  NSString *url=reading ? _reading.selectedURL : nil;
+  _readerChip.hidden=!(reading && _reading.selectedHasArticle) || _editingAddress;
+  // The rail's badge is rebuilt with the rest of the rail; only do that when the number changed.
+  if (_shownUnread!=_reading.unreadCount) { _shownUnread=_reading.unreadCount; __weak BrowserController *weak=self; dispatch_async(dispatch_get_main_queue(), ^{ [weak refresh]; }); }
+  if (!reading) { if (_sessionPicker.hidden) { _sessionPicker.hidden=NO; [self layout]; } return; }
+  if (!_editingAddress) { _address.stringValue=url ? DisplayAddress(C(url)) : @""; _addressBar.symbolName=url ? AddressSymbol(C(url)) : @"tray"; _address.placeholderString=@"Search or enter address"; }
+  _window.title=[NSString stringWithFormat:@"%@ — Eimerrail",_reading.selectedTitle ?: @"Reading"];
+  // The picker sets the session the page is read in; a one-off isolated profile would forget it.
+  [_sessionPicker removeAllItems];
+  for (const auto &session : _model.state.sessions) { [_sessionPicker addItemWithTitle:S(session.name)]; _sessionPicker.lastItem.representedObject=S(session.id); }
+  if (_sessionPicker.hidden!=!url) { _sessionPicker.hidden=!url; [self layout]; }
+  for (NSMenuItem *item in _sessionPicker.itemArray) if ([item.representedObject isEqual:_reading.selectedSession]) [_sessionPicker selectItem:item];
+  _sessionLabel.stringValue=url ? [NSString stringWithFormat:@"%@%@ session",_reading.selectedHasArticle ? @"Reader view · " : @"",[self sessionName:C(_reading.selectedSession)]] : @"Reading";
+}
+- (BOOL)pasteIntoReading {
+  NSResponder *responder=_window.firstResponder;
+  // Pasting into the address bar stays a paste; so does adding to text in the paste field.
+  if ([responder isKindOfClass:NSText.class] && ((NSText *)responder).isFieldEditor) {
+    id field=((NSText *)responder).delegate;
+    if (field!=_reading.sidebar.captureField || ((NSText *)responder).string.length) return NO;
+  }
+  return [_reading saveFromPasteboard];
+}
+- (void)savePageToReading:(id)sender {
+  (void)sender; const auto *active=_model.tab(_model.state.activeTabID);
+  if (_homeVisible || _readingVisible || !active || !rail::isWebURL(active->url)) { [self setStatus:@"Open a web page to save it to your reading list."]; return; }
+  [_reading saveCurrentPage:S(active->url) title:S(active->title)];
+}
+- (void)saveTabToReading:(NSMenuItem *)sender {
+  const auto *tab=_model.tab(C(sender.representedObject)); if (tab) [_reading saveCurrentPage:S(tab->url) title:S(tab->title)];
+}
+// A pinned tab or a Space rule decides where a link goes, as for links from other apps.
+- (void)openReadingURL:(NSString *)url session:(NSString *)session {
+  if (_quitting) return;
+  const std::string address=C(url);
+  if (!_model.pinnedTabForURL(address).empty()) { NSURL *link=[NSURL URLWithString:url]; _readingVisible=NO; if (link) [self openExternalURLs:@[link]]; return; }
+  const std::string ruled=_model.spaceForURL(address), spaceID=ruled.empty() ? _model.state.activeSpaceID : ruled;
+  std::string tabID;
+  for (const auto &tab : _model.state.tabs) if (tab.spaceID==spaceID && tab.url==address) { tabID=tab.id; break; }
+  if (tabID.empty()) tabID=_model.addTab(spaceID,address,Now(),C(session));
+  if (tabID.empty()) return;
+  [self selectTabID:tabID];
+  if (const auto *space=_model.space(spaceID); !ruled.empty() && space) [self setStatus:[NSString stringWithFormat:@"Opened in %@.",S(space->name)]];
+}
 
 #pragma mark Projects
 
@@ -1215,7 +1348,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 }
 - (void)showHome:(id)sender {
   (void)sender; if (_quitting) return;
-  _homeVisible=YES; _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
+  _homeVisible=YES; _readingVisible=NO; _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
   [self refresh]; [self checkProjects:NO];
 }
 - (void)checkProjects:(BOOL)force {
@@ -1752,6 +1885,14 @@ static ProjectTone RunTone(const std::string &result) {
     else if ([action isEqual:@"pin"]) { _model.togglePin(tabID); [self refresh]; }
     else if ([action isEqual:@"age"]) { if (auto *tab=_model.tab(tabID)) tab->lastUsed=Now()-_model.state.idleMinutes*60-1; [self checkIdle]; }
     else if ([action isEqual:@"sidebar"]) [self toggleSidebar:nil];
+    else if ([action isEqual:@"key"]) {
+      NSEventModifierFlags flags=([command[@"command"] boolValue] ? NSEventModifierFlagCommand : 0)|([command[@"shift"] boolValue] ? NSEventModifierFlagShift : 0); NSString *chars=command[@"chars"] ?: @"";
+      NSEvent *event=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:_window.windowNumber context:nil characters:chars charactersIgnoringModifiers:chars isARepeat:NO keyCode:(unsigned short)[command[@"keyCode"] intValue]];
+      [NSApp sendEvent:event];
+    }
+    else if ([action isEqual:@"sheetCancel"]) { if (_window.attachedSheet) [_window endSheet:_window.attachedSheet returnCode:NSModalResponseAbort]; }
+    else if ([action isEqual:@"reading"]) { if (!_readingVisible) [self showReading:nil]; }
+    else if ([action hasPrefix:@"reading"]) [_reading runAutomation:command action:action];
     else if ([action isEqual:@"menu"]) {
       for (NSMenuItem *group in NSApp.mainMenu.itemArray) {
         NSInteger index=[group.submenu indexOfItemWithTitle:command[@"title"] ?: @""];
@@ -1845,7 +1986,7 @@ static ProjectTone RunTone(const std::string &result) {
   }
   NSMutableArray *sheetText=[NSMutableArray array];
   if (NSView *content=_window.attachedSheet.contentView) { NSMutableArray<NSView *> *queue=[NSMutableArray arrayWithObject:content]; while (queue.count) { NSView *v=queue.firstObject; [queue removeObjectAtIndex:0]; [queue addObjectsFromArray:v.subviews]; if ([v isKindOfClass:NSTextField.class] && ((NSTextField *)v).stringValue.length) [sheetText addObject:((NSTextField *)v).stringValue]; if ([v isKindOfClass:NSButton.class]) [sheetText addObject:[@"[" stringByAppendingFormat:@"%@]",((NSButton *)v).title]]; } }
-  NSDictionary *snapshot=@{@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
+  NSDictionary *snapshot=@{@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
   [[NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
 }
 @end

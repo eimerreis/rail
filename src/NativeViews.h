@@ -69,6 +69,8 @@ RailButton *RailAction(NSString *title, NSString *symbol, NSString *help, void (
 @property(nonatomic, readonly) NSTextField *field;
 @property(nonatomic, copy) NSString *symbolName;
 @property(nonatomic, copy) void (^onFocusChange)(BOOL focused);
+// Replace the fill and border used while the field is neither focused nor hovered.
+@property(nonatomic, strong) NSColor *restingFill, *restingStroke;
 @end
 
 @interface RailDownloadRow : NSObject

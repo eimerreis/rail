@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eimerrail — Reading list · A · Toolbar tray</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<link rel="stylesheet" href="reading.css">
+<style>
+/* Toolbar entry */
+.tray-btn{display:flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:6px;font-size:11px;font-weight:600;color:var(--accent);background:var(--selected);margin-right:4px}
+.tray-btn svg{width:15px;height:15px}
+
+/* The page you were on, behind the tray */
+.page{padding:26px 40px}
+.pr{max-width:860px}
+.pr h1{font-size:19px;font-weight:650;letter-spacing:-.3px;margin:0 0 8px}
+.pr .sub{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--sub);margin-bottom:18px}
+.pr .tabs{display:flex;gap:18px;border-bottom:1px solid var(--line);font-size:12px;color:var(--sub);margin-bottom:18px}
+.pr .tabs span{padding:0 0 9px}
+.pr .tabs .on{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.pr p{font-size:13px;line-height:1.55;margin:0 0 16px;max-width:64ch}
+.diff{border:1px solid var(--line);border-radius:8px;overflow:hidden;font:12px/1.65 var(--mono)}
+.diff .fn{padding:8px 12px;background:var(--shell);border-bottom:1px solid var(--line);color:var(--sub)}
+.diff div.l{padding:0 12px;white-space:pre}
+.diff .add{background:#e9f5ed;color:#205a37}
+.diff .del{background:#fbecea;color:#8f2f24}
+
+/* Tray */
+.tray{position:absolute;top:47px;right:88px;width:408px;background:var(--sidebar);border:1px solid #cbd5df;border-radius:10px;box-shadow:0 2px 6px rgba(39,52,69,.08),0 18px 44px -12px rgba(39,52,69,.3);overflow:hidden;z-index:5}
+.tray-head{padding:10px 10px 8px}
+.capture{height:34px;padding:0 8px 0 10px;font-size:12px}
+.tray-tools{display:flex;align-items:center;justify-content:space-between;margin-top:9px}
+.list{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px}
+.item{display:flex;gap:10px;align-items:flex-start;padding:8px 8px 8px 9px;border-radius:7px;position:relative}
+.item .src{margin-top:1px}
+.item .body{flex:1;min-width:0}
+.item .ti{font-size:12px;font-weight:550;line-height:1.35;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.item .me{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--sub);margin-top:2px}
+.item.hover{background:var(--hover)}
+.item .acts{display:flex;align-items:center;gap:2px;margin:-1px -3px 0 0}
+.item.hover .check-btn{background:#fff;color:var(--accent);box-shadow:inset 0 0 0 1px var(--line)}
+.item .mk{margin-top:1px}
+.item.fetching .ti{color:var(--sub);font-weight:400}
+.item.fetching .src{background:var(--line-soft);color:var(--sub)}
+.spin{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1.5px #c5d0db;border-top:1.5px solid var(--accent)}
+.done{display:flex;align-items:center;gap:7px;height:32px;padding:0 9px;font-size:11px;color:var(--sub)}
+.done svg{width:13px;height:13px;color:var(--ok)}
+.done a{margin-left:auto;color:var(--accent);font-weight:550;padding:0 4px}
+.hint{position:absolute;left:37px;bottom:-1px}
+.tray-foot{display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 12px;font-size:10.5px;color:var(--sub)}
+.tray-foot span{display:flex;align-items:center;gap:5px}
+.tray-foot a{color:var(--accent);font-weight:550}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script src="icons-reading.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn current" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn" aria-label="Settings"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="space-head">Work<button class="icon-btn"><svg class="i"><use href="#dots"/></svg></button></div>
+    <div class="space-desc">A little room for good work.</div>
+    <div class="side-scroll">
+      <div class="rows"><div class="row"><span class="fav"><svg class="i"><use href="#grid"/></svg></span><span class="t">Work home</span><span class="mk">W</span></div></div>
+      <div class="sec">Pinned</div>
+      <div class="pins">
+        <div class="pin"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>DevOps</div>
+        <div class="pin"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>GitHub</div>
+        <div class="pin"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span>Insights</div>
+        <div class="pin"><span class="fav"><svg class="i"><use href="#calendar"/></svg></span>Calendar</div>
+      </div>
+      <div class="sec">Tabs</div>
+      <div class="rows">
+        <div class="row sel"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">PR 482 · Retry invoice export</span><span class="mk">W</span></div>
+        <div class="row"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span><span class="t">Failures · billing-prod</span><span class="mk i">I</span></div>
+        <div class="row"><span class="fav local"><svg class="i"><use href="#laptop"/></svg></span><span class="t">localhost:3000</span><span class="mk">W</span></div>
+        <div class="row asleep"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Sprint 41 board</span><span class="moon"><svg class="i"><use href="#moon"/></svg></span></div>
+      </div>
+      <div class="new-tab"><svg class="i"><use href="#plus"/></svg>New tab</div>
+    </div>
+    <div class="side-foot">1 asleep · after 10 min</div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#lock"/></svg><span class="path">dev.azure.com/contoso/billing/_git/billing-api/pullrequest/<b>482</b></span></div>
+      <button class="tray-btn" aria-label="Reading list, 7 unread" aria-expanded="true"><svg class="i"><use href="#inbox"/></svg><span class="num">7</span></button>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <div class="pr">
+        <h1>Retry invoice export when the ledger times out</h1>
+        <div class="sub"><span class="pill info"><svg class="i"><use href="#pr"/></svg>Active</span>PR 482 into main · 2 reviewers</div>
+        <div class="tabs"><span>Overview</span><span class="on">Files</span><span>Commits</span></div>
+        <p>Exports fail hard on the first ledger timeout. This retries with backoff and caps the total attempts per export.</p>
+        <div class="diff">
+          <div class="fn">src/Billing/Export/InvoiceExporter.cs</div>
+          <div class="l">    public async Task&lt;ExportResult&gt; RunAsync(ExportRequest request)</div>
+          <div class="l">    {</div>
+          <div class="l del">-       var rows = await ledger.ReadAsync(request.Period);</div>
+          <div class="l add">+       var rows = await retry.ExecuteAsync(</div>
+          <div class="l add">+           token =&gt; ledger.ReadAsync(request.Period, token));</div>
+          <div class="l">        return await writer.WriteAsync(rows);</div>
+          <div class="l">    }</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status"><span><span class="sdot" style="width:6px;height:6px;border-radius:50%;background:#527eb1"></span>Work session</span><span class="sample">Sample content</span></div>
+  </main>
+
+  <section class="tray" aria-label="Reading list">
+    <div class="tray-head">
+      <div class="capture focus"><svg class="i"><use href="#link"/></svg><span class="ph"><span class="caret"></span>Paste a link to read later</span><kbd>⌘V</kbd></div>
+      <div class="tray-tools">
+        <div class="seg"><span class="on">Inbox <span class="n num">7</span></span><span>Read <span class="n num">23</span></span></div>
+        <button class="btn quiet"><svg class="i"><use href="#save"/></svg>Save this page</button>
+      </div>
+    </div>
+    <div class="list">
+      <div class="item fetching"><span class="src"><span class="spin"></span></span><div class="body"><div class="ti">fieldnotes.dev/reading-the-cef-process-model</div><div class="me">Saved just now · fetching title</div></div></div>
+      <div class="item hover"><span class="src">R</span><div class="body"><div class="ti">Retry budgets are smaller than you think</div><div class="me">rivetnotes.dev · 2 h</div></div><div class="acts"><span class="mk">W</span><button class="check-btn" aria-label="Mark read"><svg class="i"><use href="#check"/></svg></button></div></div>
+      <div class="item"><span class="src v">C</span><div class="body"><div class="ti">What idle tab unloading actually frees in Chromium</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Compositor Weekly · 5 h</div></div></div>
+      <div class="done"><svg class="i"><use href="#check"/></svg>Marked read: A small case for boring pipelines<a>Undo</a></div>
+      <div class="item"><span class="src g">S</span><div class="body"><div class="ti">Notes from a year of primary constructors</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Sharp Corners · yesterday</div></div></div>
+      <div class="item"><span class="src b">T</span><div class="body"><div class="ti">Sampling telemetry without losing the invoice that failed</div><div class="me">tracewell.io · yesterday</div></div></div>
+      <div class="item"><span class="src s">K</span><div class="body"><div class="ti">Keyboards for one: tools with a single user</div><div class="me">kestrel.blog · Tue</div></div></div>
+      <div class="item"><span class="src v">C</span><div class="body"><div class="ti">Dead-letter queues are a to-do list nobody reads</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Compositor Weekly · Mon</div></div></div>
+    </div>
+    <div class="tray-foot"><span>3 feeds · checked 14:31</span><a>Manage feeds</a></div>
+  </section>
+</div>
+</body>
+</html>

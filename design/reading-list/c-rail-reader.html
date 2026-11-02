@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eimerrail — Reading list · C · Rail reader</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<link rel="stylesheet" href="reading.css">
+<style>
+.rail-btn .badge{background:var(--accent);box-shadow:0 0 0 1.5px var(--rail)}
+.sidebar{width:292px}
+.side-pad{padding:0 12px}
+.capture{height:32px;padding:0 7px 0 9px;font-size:11.5px;margin:6px 0 9px}
+.capture kbd{font-size:9.5px}
+.seg{display:flex}
+.seg>span{flex:1;justify-content:center}
+
+.list{flex:1;min-height:0;overflow:hidden;padding:8px 7px 0}
+.item{display:flex;gap:9px;align-items:flex-start;padding:8px 9px;border-radius:7px;position:relative}
+.item .src{width:16px;height:16px;border-radius:4px;font-size:9px;margin-top:1px}
+.item .ti{font-size:11.5px;font-weight:550;line-height:1.32;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item .me{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--sub);margin-top:3px}
+.item.sel{background:var(--selected)}
+.item.sel .ti{color:var(--accent)}
+.item.sel .me{color:#44678e}
+.bar{height:2px;border-radius:1px;background:#d7e0e9;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent-strong)}
+svg.i.lock{width:10px;height:10px;color:var(--iso-ink);stroke-width:2}
+.me .warnt{color:var(--iso-ink)}
+
+.feeds{border-top:1px solid var(--line);padding:3px 7px 7px}
+.feeds .sec{padding:8px 9px 4px;font-size:10px}
+.feeds .sec a{color:var(--accent);font-weight:550}
+.feeds .row{height:26px;font-size:11px;padding-right:9px}
+.feeds .row .num{font-size:10px;color:var(--sub)}
+.feeds .src{width:14px;height:14px;border-radius:4px;font-size:8.5px}
+
+.url .chip{margin-left:auto;display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 6px;border-radius:4px;background:var(--selected);color:var(--accent);font-size:10px;font-weight:600}
+.url .chip svg{width:11px;height:11px}
+
+.page{padding:0;overflow:hidden}
+.bar-top{position:sticky;top:0;display:flex;align-items:center;gap:8px;height:48px;padding:0 20px 0 24px;background:#fff;border-bottom:1px solid var(--line-soft);font-size:11px;color:var(--sub)}
+.bar-top .where{display:flex;align-items:center;gap:7px;margin-right:auto}
+.bar-top .btn kbd{margin-left:3px}
+.article{width:636px;margin:0 auto;padding:36px 0 0;font-family:Georgia,"Times New Roman",serif}
+.article h1{font-size:36px;font-weight:400;line-height:1.14;letter-spacing:-.8px;margin:0 0 12px;text-wrap:balance}
+.article .by{font:12px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;color:var(--sub);margin-bottom:26px}
+.article p{font-size:17px;line-height:1.62;margin:0 0 18px;color:#2c3948}
+.article h2{font-size:21px;font-weight:400;letter-spacing:-.25px;margin:28px 0 10px}
+.article pre{font:13px/1.6 var(--mono);background:var(--shell);border-radius:7px;padding:12px 14px;margin:0 0 18px;color:var(--ink)}
+.status .kept{display:flex;gap:6px}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script src="icons-reading.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-sep"></div>
+    <button class="rail-btn current" aria-label="Reading, 7 unread"><svg class="i"><use href="#inbox"/></svg><span class="badge num">7</span></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn" aria-label="Settings"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="side-pad">
+      <div class="space-head" style="padding:0 0 4px 3px">Reading</div>
+      <div class="capture"><svg class="i"><use href="#link"/></svg><span class="ph">Paste a link to read later</span><kbd>⌘V</kbd></div>
+      <div class="seg"><span class="on">Inbox <span class="n num">7</span></span><span>Read <span class="n num">23</span></span></div>
+    </div>
+
+    <div class="list">
+      <div class="item sel"><span class="src">R</span><div><div class="ti">Retry budgets are smaller than you think</div><div class="me">rivetnotes.dev · 12 min · 2 h</div></div></div>
+      <div class="item"><span class="src v">C</span><div style="flex:1;min-width:0"><div class="ti">What idle tab unloading actually frees in Chromium</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Compositor Weekly · 4 min left</div><div class="bar"><i style="width:62%"></i></div></div></div>
+      <div class="item"><span class="src g">S</span><div><div class="ti">Notes from a year of primary constructors</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Sharp Corners · 7 min</div></div></div>
+      <div class="item"><span class="src b">T</span><div><div class="ti">Sampling telemetry without losing the invoice that failed</div><div class="me">tracewell.io · 18 min</div></div></div>
+      <div class="item"><span class="src s">Q</span><div><div class="ti">Q3 platform review: what we’d cut</div><div class="me warnt"><svg class="i lock"><use href="#lock"/></svg>Needs login · opens as a tab in Work</div></div></div>
+      <div class="item"><span class="src s">K</span><div><div class="ti">Keyboards for one: tools with a single user</div><div class="me">kestrel.blog · 9 min</div></div></div>
+      <div class="item"><span class="src v">C</span><div><div class="ti">Dead-letter queues are a to-do list nobody reads</div><div class="me"><svg class="i rss"><use href="#rss"/></svg>Compositor Weekly · 6 min</div></div></div>
+    </div>
+
+    <div class="feeds">
+      <div class="sec">Feeds<a>Manage</a></div>
+      <div class="row"><span class="src v">C</span><span class="t">Compositor Weekly</span><span class="num">2</span></div>
+      <div class="row"><span class="src g">S</span><span class="t">Sharp Corners</span><span class="num">1</span></div>
+      <div class="row"><span class="src">R</span><span class="t">Rivet Notes</span></div>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn dim"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#lock"/></svg><span class="path">rivetnotes.dev/<b>retry-budgets</b></span><span class="chip"><svg class="i"><use href="#reader"/></svg>Reader</span></div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <div class="bar-top">
+        <div class="where"><span class="src">R</span>Rivet Notes · 12 min</div>
+        <button class="btn quiet"><svg class="i"><use href="#ext"/></svg>Open original</button>
+        <button class="btn tint"><svg class="i"><use href="#check"/></svg>Mark read <kbd>E</kbd></button>
+      </div>
+      <article class="article">
+        <h1>Retry budgets are smaller than you think</h1>
+        <div class="by">Published 30 October</div>
+        <p>Every retry policy I have inherited was written on a good day. Three attempts, exponential backoff, a little jitter. It reads as caution. Then the database slows down for ninety seconds and those three attempts become a second wave of traffic, aimed at the one thing that is already struggling.</p>
+        <p>The fix is rarely a smarter policy. It is a budget: a limit on how much extra load retries may add across the whole service, not per request.</p>
+        <h2>Count what you can afford</h2>
+        <p>Start with the spare capacity you actually have. If the ledger handles 400 reads a second and normally serves 340, you can afford 60 retries a second, and that number has to be shared.</p>
+        <pre>retries_allowed = spare_capacity × window
+# 10% of normal traffic is a sensible first limit</pre>
+        <p>Once the budget runs out, callers fail fast and say so. That feels worse in the dashboard for a few minutes, and it is much better for everyone waiting in the queue behind them.</p>
+      </article>
+    </div>
+
+    <div class="status"><span><span class="sdot" style="width:6px;height:6px;border-radius:50%;background:#527eb1"></span>Reader view · Work session</span><span class="sample">Sample content</span></div>
+  </main>
+</div>
+</body>
+</html>

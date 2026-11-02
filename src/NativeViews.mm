@@ -333,7 +333,8 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
     [NSColor.whiteColor setFill]; [shape fill];
     [RailColor(0x3976be) setStroke]; shape.lineWidth = 2; [shape stroke];
   } else {
-    [(_hovered ? RailColor(0xe2e8ef) : RailColor(0xe9eef3)) setFill]; [shape fill];
+    [(_hovered ? RailColor(0xe2e8ef) : self.restingFill ?: RailColor(0xe9eef3)) setFill]; [shape fill];
+    if (self.restingStroke) { [self.restingStroke setStroke]; shape.lineWidth = 1; [shape stroke]; }
   }
 }
 @end

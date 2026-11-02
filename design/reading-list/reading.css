@@ -1,0 +1,18 @@
+/* Atoms shared by the reading list mockups, on top of ../project-overview/shell.css. */
+.win{position:relative}
+.src{width:18px;height:18px;border-radius:5px;display:grid;place-items:center;flex-shrink:0;font-size:10px;font-weight:650;background:#e3ebf4;color:#3a5f88}
+.src.g{background:var(--pers);color:var(--pers-ink)}
+.src.b{background:var(--iso);color:var(--iso-ink)}
+.src.v{background:#e9e4f4;color:#5b4590}
+.src.s{background:#e6ebf0;color:#4a5b6d}
+.capture{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #d5dee7;border-radius:7px;color:#5c6e80}
+.capture svg{width:14px;height:14px}
+.capture .ph{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.capture.focus{border-color:#3976be;box-shadow:0 0 0 3px rgba(57,118,190,.18)}
+.capture .caret{display:inline-block;width:1px;height:14px;background:var(--accent);margin-right:1px;vertical-align:-3px}
+svg.i.rss{width:10px;height:10px;color:#a0641b;stroke-width:2.2}
+.check-btn{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--sub)}
+.check-btn svg{width:16px;height:16px}
+.sample{color:var(--sub)}
+.seg span.n{padding:0;height:auto}
+.url .path{white-space:nowrap}

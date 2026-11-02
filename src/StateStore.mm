@@ -98,4 +98,42 @@ bool SaveProjects(NSString *directory, const Projects &projects, NSError **error
   if (!data) return false;
   return [data writeToFile:[directory stringByAppendingPathComponent:@"projects.json"] options:NSDataWritingAtomic error:error];
 }
+bool LoadReading(NSString *directory, ReadingList &reading, NSError **error) {
+  NSString *path = [directory stringByAppendingPathComponent:@"reading.json"];
+  if (![NSFileManager.defaultManager fileExistsAtPath:path]) { reading.state = {}; return true; }
+  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  if (!data) return false;
+  id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
+  if (![value isKindOfClass:NSDictionary.class] || Number(value[@"version"],0) != 1) {
+    if (error && !*error) *error = [NSError errorWithDomain:@"Eimerrail" code:3 userInfo:@{NSLocalizedDescriptionKey:@"The saved reading list is not a supported Eimerrail file."}];
+    return false;
+  }
+  ReadingState state;
+  for (id f in Array(value[@"feeds"])) {
+    if (![f isKindOfClass:NSDictionary.class]) continue;
+    Feed feed; feed.id = Text(f[@"id"]); feed.url = Text(f[@"url"]); feed.title = Text(f[@"title"]); feed.lastSuccess = Number(f[@"lastSuccess"],0); feed.error = Text(f[@"error"]); feed.fetched = ReadBoolean(f[@"fetched"],false);
+    for (id seen in Array(f[@"seen"])) if ([seen isKindOfClass:NSString.class]) feed.seen.push_back(Text(seen));
+    state.feeds.push_back(feed);
+  }
+  for (id i in Array(value[@"items"])) {
+    if (![i isKindOfClass:NSDictionary.class]) continue;
+    ReadingItem item; item.id = Text(i[@"id"]); item.url = Text(i[@"url"]); item.title = Text(i[@"title"]); item.site = Text(i[@"site"]); item.feedID = Text(i[@"feedID"]); item.sessionID = Text(i[@"sessionID"]);
+    item.added = Number(i[@"added"],0); item.readAt = Number(i[@"readAt"],0); item.minutes = (int)Number(i[@"minutes"],0); item.progress = Number(i[@"progress"],0); item.reader = readerStatusFromName(Text(i[@"reader"]));
+    state.items.push_back(item);
+  }
+  reading.state = std::move(state); reading.sanitize();
+  return true;
+}
+bool SaveReading(NSString *directory, const ReadingList &reading, NSError **error) {
+  if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:error]) return false;
+  NSMutableArray *feeds = [NSMutableArray array], *items = [NSMutableArray array];
+  for (const auto &f : reading.state.feeds) {
+    NSMutableArray *seen = [NSMutableArray array]; for (const auto &key : f.seen) [seen addObject:S(key)];
+    [feeds addObject:@{@"id":S(f.id),@"url":S(f.url),@"title":S(f.title),@"lastSuccess":@(f.lastSuccess),@"error":S(f.error),@"fetched":@(f.fetched),@"seen":seen}];
+  }
+  for (const auto &i : reading.state.items) [items addObject:@{@"id":S(i.id),@"url":S(i.url),@"title":S(i.title),@"site":S(i.site),@"feedID":S(i.feedID),@"sessionID":S(i.sessionID),@"added":@(i.added),@"readAt":@(i.readAt),@"minutes":@(i.minutes),@"progress":@(i.progress),@"reader":@(readerStatusName(i.reader))}];
+  NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"version":@1,@"feeds":feeds,@"items":items} options:NSJSONWritingPrettyPrinted error:error];
+  if (!data) return false;
+  return [data writeToFile:[directory stringByAppendingPathComponent:@"reading.json"] options:NSDataWritingAtomic error:error];
+}
 }

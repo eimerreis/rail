@@ -28,7 +28,7 @@ A browser shaped around one developer's own working day rather than a general au
 
 ## Capabilities and Constraints
 
-- Shipped: Spaces rail, vertical tabs, pinned shortcuts, named and isolated sessions, idle unloading (1–60 min), find, history, persistence in `~/Library/Application Support/Eimerrail/`.
+- Shipped: Spaces rail, vertical tabs, pinned shortcuts, named and isolated sessions, idle unloading (1–60 min), find, history, a global reading list with a plain reader view and feeds, persistence in `~/Library/Application Support/Eimerrail/`.
 - Exploring (not built): a developer project overview showing per-project environment links with health, pipeline status, alerts/telemetry needing attention, and whether local dev servers are running.
 - Decided: the overview is a per-Space home with one card per project; each project belongs to exactly one Space. Data model, entry paths and status fetching: `docs/plans/2026-10-29-projects-model.md`.
 - Remote pages have no application or filesystem bridge; any overview data source must respect that boundary.

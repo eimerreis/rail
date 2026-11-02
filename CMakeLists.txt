@@ -12,7 +12,7 @@ set(EIMERRAIL_SIGN_IDENTITY "-" CACHE STRING "Local macOS signing identity; '-' 
 # `defaults write de.eimerreis.eimerrail GitHubClientID <id>`.
 set(EIMERRAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Eimerrail GitHub App")
 
-add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp)
+add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp src/Reading.cpp)
 target_include_directories(BrowserModel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 if(BUILD_TESTING)
   add_executable(BrowserModelTests tests/BrowserModelTests.cpp)
@@ -24,6 +24,9 @@ if(BUILD_TESTING)
   add_executable(ProjectsTests tests/ProjectsTests.cpp)
   target_link_libraries(ProjectsTests PRIVATE BrowserModel)
   add_test(NAME ProjectsTests COMMAND ProjectsTests)
+  add_executable(ReadingTests tests/ReadingTests.cpp)
+  target_link_libraries(ReadingTests PRIVATE BrowserModel)
+  add_test(NAME ReadingTests COMMAND ReadingTests)
   if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/StateStoreTests.mm")
     enable_language(OBJCXX)
     add_executable(StateStoreTests tests/StateStoreTests.mm src/StateStore.mm)
@@ -33,6 +36,13 @@ if(BUILD_TESTING)
       OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON OBJCXX_EXTENSIONS OFF
     )
     add_test(NAME StateStoreTests COMMAND StateStoreTests)
+    add_executable(FeedParserTests tests/FeedParserTests.mm src/FeedParser.mm src/StateStore.mm)
+    target_compile_options(FeedParserTests PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    target_link_libraries(FeedParserTests PRIVATE BrowserModel "-framework Foundation")
+    set_target_properties(FeedParserTests PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON OBJCXX_EXTENSIONS OFF
+    )
+    add_test(NAME FeedParserTests COMMAND FeedParserTests)
   endif()
 endif()
 
@@ -71,6 +81,10 @@ add_executable(Eimerrail MACOSX_BUNDLE
   src/ProjectStatus.mm
   src/ProjectsView.mm
   src/Keychain.mm
+  src/FeedParser.mm
+  src/ReadingExtractor.mm
+  src/ReadingView.mm
+  src/ReadingController.mm
 )
 SET_EXECUTABLE_TARGET_PROPERTIES(Eimerrail)
 target_include_directories(Eimerrail PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

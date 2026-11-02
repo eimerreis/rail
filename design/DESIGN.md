@@ -198,6 +198,7 @@ The comparison canvas is at most 1400px wide. The window has a 640px minimum wid
 | --- | --- | --- |
 | Native | 224px integrated sidebar; pinned rows above tabs; Spaces at the bottom | Sidebar collapses and page expands |
 | Rail | 45px Spaces strip plus 210px compact sidebar; two-column pinned shelf | Both navigation regions disappear and page expands |
+| Rail, Reading open | 45px Spaces strip plus a sidebar of at least 292px; article column 636px | As Rail |
 | Focus | 236px floating sidebar, 11px from the left, 60px from the top, 35px from the bottom; Spaces above tabs | Drawer translates left by 265px; page position stays fixed |
 
 The toolbar is 51px tall and status bar 25px. Default tab rows have a 35px minimum height; Rail uses 32px. Small controls use the local spacing steps recorded above; there is no uniform global spacing multiple. The sample article has a bounded reading column independent of navigation.
@@ -219,6 +220,7 @@ Rounded rectangles scale with purpose: tiny session markers, compact controls, r
 - **Session markers and menu:** W, P, and I badges connect to a labeled menu with Work, Personal, and Isolated choices. Reusable sessions are separate from Spaces; the isolated option belongs to one tab. The current menu item has a checkmark.
 - **Actions and fields:** compact tinted actions and rounded inputs. App buttons use a two-pixel focus outline in their variant accent, inset by a negative two-pixel offset; inputs retain the shared ring and three-pixel offset. Hover uses the variant hover tone; pressed app buttons darken with `brightness(.94)`.
 - **Popovers:** compact sidebar-colored containers with a border and soft shadow. The session menu is 263px wide; idle settings are 277px; the new-tab form is 310px. The idle selector offers 1, 5, 10, 15, 30, and 60 minutes, with 10 selected initially. Unloading is a manual demonstration in this artifact.
+- **Reading:** a rail entry below the Spaces with a blue unread badge, because unread is not an alert. Its sidebar holds a white paste field with a 1px `rail-line` border, Inbox and Read segments, item rows with a letter tile or favicon, and feeds at the bottom. The reader sets article text in Georgia (36px title, 17px body at 27.5px line height) in a 636px column, under a 48px action bar. Pages it cannot read say why in the row and open as a tab.
 - **Sidebar controls:** visible buttons and Command-S toggle navigation in all proposals. Hidden sidebars become inert. Escape closes menus. Traffic lights are visual affordances only.
 
 ## Do's and Don'ts
