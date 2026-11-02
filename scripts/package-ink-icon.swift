@@ -1,14 +1,14 @@
 // Package the approved artwork without regenerating it.
-// Run from any directory: swift /path/to/eimerrail/scripts/package-ink-icon.swift
+// Run from any directory: swift /path/to/rail/scripts/package-ink-icon.swift
 import AppKit
 import ImageIO
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-let artwork = root.appendingPathComponent("design/icon/astra/eimerrail-ink.png")
+let artwork = root.appendingPathComponent("design/icon/astra/rail-ink.png")
 let preview = root.appendingPathComponent("design/icon/astra/AppIcon-ink.png")
 let output = root.appendingPathComponent("resources/AppIcon.icns")
 let files = FileManager.default
-let temporary = files.temporaryDirectory.appendingPathComponent("eimerrail-icon-\(UUID().uuidString)")
+let temporary = files.temporaryDirectory.appendingPathComponent("rail-icon-\(UUID().uuidString)")
 let iconset = temporary.appendingPathComponent("AppIcon.iconset")
 try files.createDirectory(at: iconset, withIntermediateDirectories: true)
 defer { try? files.removeItem(at: temporary) }
@@ -21,11 +21,11 @@ func context(_ size: Int) -> CGContext {
 
 func writePNG(_ image: CGImage, to url: URL) throws {
     guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
-        throw NSError(domain: "EimerrailIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot write \(url.path)"])
+        throw NSError(domain: "RailIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot write \(url.path)"])
     }
     CGImageDestinationAddImage(destination, image, nil)
     guard CGImageDestinationFinalize(destination) else {
-        throw NSError(domain: "EimerrailIcon", code: 2, userInfo: [NSLocalizedDescriptionKey: "PNG export failed: \(url.path)"])
+        throw NSError(domain: "RailIcon", code: 2, userInfo: [NSLocalizedDescriptionKey: "PNG export failed: \(url.path)"])
     }
 }
 

@@ -6,6 +6,12 @@
 #import "ProjectStatus.h"
 #import "ProjectsView.h"
 #import "ReadingController.h"
+#import "ActivityView.h"
+#import "SettingsWindow.h"
+#import "PasswordService.h"
+#import "PasswordPalette.h"
+#include "include/cef_process_message.h"
+#include <set>
 #include "include/cef_request_context.h"
 #include <algorithm>
 #include <unordered_map>
@@ -26,15 +32,17 @@ struct RuntimeTab {
   std::string pendingURL;
   std::string error;
   bool loading = false, back = false, forward = false;
+  // Find state is transient and private to this live tab, including isolated tabs.
+  std::string findText;
+  bool findVisible = false, findPending = false;
+  int findCount = 0, findOrdinal = 0, findIdentifier = -1;
+  // DevTools for this page. A docked one is a borderless child window over the right of the page area,
+  // with a divider in the container to resize it.
+  CefRefPtr<CefBrowser> devTools;
+  __strong NSWindow *devToolsWindow = nil;
+  __strong RailResizeHandle *devToolsDivider = nil;
+  bool devToolsOpen = false, devToolsDocked = false, reopenDevTools = false;
 };
-// Icons offered for Spaces; any other SF Symbol can be typed in.
-NSArray<NSString *> *SpaceSymbols() {
-  return @[@"briefcase",@"house",@"book",@"square.grid.2x2",@"star",@"heart",@"bolt",@"flame",@"leaf",@"globe",@"hammer",@"wrench.and.screwdriver",@"terminal",@"chevron.left.forwardslash.chevron.right",@"paintbrush",@"graduationcap",@"cart",@"gamecontroller",@"music.note",@"camera",@"airplane",@"building.2",@"person.2",@"flag"];
-}
-NSString *SymbolTitle(NSString *symbol) {
-  NSDictionary *titles=@{@"square.grid.2x2":@"Grid",@"wrench.and.screwdriver":@"Tools",@"chevron.left.forwardslash.chevron.right":@"Code",@"music.note":@"Music",@"building.2":@"Office",@"person.2":@"People",@"graduationcap":@"Learning",@"gamecontroller":@"Games"};
-  return titles[symbol] ?: symbol.capitalizedString;
-}
 NSString *SymbolForURL(const std::string &url) {
   NSString *host = [NSURLComponents componentsWithString:S(url)].host.lowercaseString ?: @"";
   if ([host containsString:@"github"]) return @"chevron.left.forwardslash.chevron.right";
@@ -108,7 +116,7 @@ NSString *NormalizedAddress(NSString *input) {
 }
 }
 
-@interface BrowserController ()
+@interface BrowserController () <SettingsHost>
 - (void)layout;
 - (void)refresh;
 - (void)saveSoon;
@@ -135,6 +143,10 @@ NSString *NormalizedAddress(NSString *input) {
   BOOL _readingVisible, _readingClosed;
   NSUInteger _shownUnread;
   RailButton *_readerChip;
+  ActivityView *_activity;
+  // The Space home (Projects or Activity) replaces the page area until a tab is selected; it is not saved.
+  NSInteger _homePage;            // 0 Projects, 1 Activity
+  NSString *_activitySelection;
   BOOL _homeVisible, _projectsDirty, _projectsSavingAllowed, _statusRefreshQueued, _loadingRepositories;
   NSInteger _homeFilter;
   NSTimer *_statusTimer;
@@ -143,14 +155,28 @@ NSString *NormalizedAddress(NSString *input) {
   std::unordered_map<std::string, std::string> _pendingPopups;
   uint64_t _nextGeneration;
   NSString *_directory;
+  PasswordService *_passwordService;
+  PasswordPalette *_passwordPalette;
+  RailButton *_passwordButton;
+  std::string _passwordTab;
+  uint64_t _passwordGeneration;
+  NSString *_passwordURL, *_passwordToken, *_passwordRequestID;
+  NSString *_passwordFixtureOrigin;
+  void (^_passwordFillCompletion)(NSString *);
+  BOOL _passwordFillingNew;
   BOOL _automation, _quitting, _editingAddress, _savingAllowed, _historyDirty, _deletingAddress;
   // ⌘Z reopens a closed tab only until the user types again; after that it undoes text as usual.
   BOOL _undoCloseArmed;
+  // Set while docked DevTools pass on a shortcut, which arrives from their own window.
+  BOOL _forwardingDevToolsShortcut;
   rail::History _history;
   NSMutableDictionary<NSString *, id> *_favicons;
   std::vector<AddressRow> _addressRows;
   NSString *_typedAddress;
   NSMutableArray<NSURL *> *_pendingExternalURLs;
+  NSAlert *_externalAppPrompt;
+  std::string _externalAppPromptTab;
+  uint64_t _externalAppPromptGeneration;
   RailSuggestionList *_suggestionList;
   RailResizeHandle *_sidebarHandle;
   RailPanel *_dropIndicator;
@@ -158,20 +184,28 @@ NSString *NormalizedAddress(NSString *input) {
   RailSuggestionList *_tabSwitcher;
   std::vector<std::string> _switcherTabs;
   CGFloat _pinnedSectionEnd;
-  CGFloat _dragStartWidth;
+  CGFloat _dragStartWidth, _devToolsStartWidth;
+  // How far the rail and sidebar are shown, 0 to 1; animates toward sidebarVisible.
+  CGFloat _sidebarReveal;
+  NSTimer *_sidebarTimer;
+  // Outlines the Space icon a dragged tab would move to.
+  RailPanel *_railDropIndicator;
   NSString *_automationID, *_statusMessage;
   NSTimer *_idleTimer, *_saveTimer, *_automationTimer;
   RailPanel *_root, *_rail, *_sidebar, *_toolbar, *_statusbar, *_empty;
   NSView *_webHost;
   NSScrollView *_tabScroll;
   RailPanel *_tabDocument;
-  NSTextField *_spaceLabel, *_spaceSubtitle, *_sleepLabel, *_statusLabel, *_sessionLabel;
+  NSTextField *_spaceLabel, *_wordmark, *_sleepLabel, *_statusLabel, *_sessionLabel;
   RailAddressBar *_addressBar;
   NSTextField *_address, *_emptyTitle, *_emptySubtitle;
+  RailPanel *_findBar;
+  NSTextField *_findField, *_findCount;
+  RailButton *_findPrevious, *_findNext, *_findClose;
   RailButton *_back, *_forward, *_reload, *_toggle, *_sidebarToggle, *_retry, *_spaceOptions;
   NSPopUpButton *_sessionPicker;
   NSProgressIndicator *_progress;
-  NSPopover *_settings;
+  SettingsWindowController *_settingsWindow;
   // Recent downloads, newest first: name, path, url, received, total, date and a state of
   // active, done, canceled or failed. Chromium's id is only kept while this run lasts.
   NSMutableArray<NSMutableDictionary *> *_downloads;
@@ -209,26 +243,30 @@ NSString *NormalizedAddress(NSString *input) {
   return self;
 }
 - (void)start {
+  // The theme is in place before any view exists, so nothing is drawn in the wrong colours first.
+  RailSetTheme(S(_model.state.theme));
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(themeDidChange:) name:RailThemeDidChangeNotification object:nil];
   _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,1180,800) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView backing:NSBackingStoreBuffered defer:NO];
-  _window.title = @"Eimerrail"; _window.titleVisibility = NSWindowTitleHidden;
+  _window.title = @"Rail"; _window.titleVisibility = NSWindowTitleHidden;
   _window.titlebarAppearsTransparent = YES; _window.delegate = self;
-  _window.minSize = NSMakeSize(760,520); _window.backgroundColor = RailColor(0xf4f6f8);
-  _window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
-  _window.releasedWhenClosed = NO; [_window setFrameAutosaveName:_automation ? @"EimerrailAutomation" : @"EimerrailMain"];
-  _root = [[RailPanel alloc] initWithFrame:_window.contentView.bounds]; _root.fill = RailColor(0xf4f6f8);
+  _window.minSize = NSMakeSize(760,520); _window.backgroundColor = RailTint(RailRoleShell);
+  // Only Rail's own windows follow the theme; web pages keep following the system appearance.
+  _window.appearance = RailThemeAppearance();
+  _window.releasedWhenClosed = NO; [_window setFrameAutosaveName:_automation ? @"RailAutomation" : @"RailMain"];
+  _root = [[RailPanel alloc] initWithFrame:_window.contentView.bounds]; _root.fill = RailTint(RailRoleShell);
   _window.contentView = _root;
   __weak BrowserController *weak = self;
   _root.onResize = ^{ [weak layout]; };
-  _rail = [[RailPanel alloc] init]; _rail.fill = RailColor(0xe2e8ef); [_root addSubview:_rail];
-  _sidebar = [[RailPanel alloc] init]; _sidebar.fill = RailColor(0xedf1f5); [_root addSubview:_sidebar];
-  _toolbar = [[RailPanel alloc] init]; _toolbar.fill = RailColor(0xf4f6f8); [_root addSubview:_toolbar];
+  _rail = [[RailPanel alloc] init]; _rail.fill = RailTint(RailRoleRail); [_root addSubview:_rail];
+  _sidebar = [[RailPanel alloc] init]; _sidebar.fill = RailTint(RailRoleSidebar); [_root addSubview:_sidebar];
+  _toolbar = [[RailPanel alloc] init]; _toolbar.fill = RailTint(RailRoleShell); [_root addSubview:_toolbar];
   // The top 51 points of the rail, sidebar and toolbar form the window's title bar.
   for (RailPanel *panel in @[_rail,_sidebar,_toolbar]) panel.titlebarHeight = 51;
   _webHost = [[NSView alloc] init]; _webHost.wantsLayer = YES; _webHost.layer.backgroundColor = NSColor.whiteColor.CGColor; [_root addSubview:_webHost];
-  _empty = [[RailPanel alloc] init]; _empty.fill = NSColor.whiteColor; [_root addSubview:_empty];
-  _emptyTitle = RailLabel(@"A little room for what's next.",27,NSFontWeightMedium,RailColor(0x273445)); _emptyTitle.alignment = NSTextAlignmentCenter; [_empty addSubview:_emptyTitle];
-  _emptySubtitle = RailLabel(@"Enter an address or search with ⌘ L.",14,NSFontWeightRegular,RailColor(0x596879)); _emptySubtitle.alignment = NSTextAlignmentCenter; [_empty addSubview:_emptySubtitle];
-  _retry = RailAction(@"Search or enter address",@"magnifyingglass",@"Focus address bar",^{ [weak focusAddress:nil]; }); _retry.normalFill = RailColor(0xd8e7f7); _retry.ink = RailColor(0x245b96); _retry.centered = YES; [_empty addSubview:_retry];
+  _empty = [[RailPanel alloc] init]; _empty.fill = RailTint(RailRoleContent); [_root addSubview:_empty];
+  _emptyTitle = RailLabel(@"A little room for what's next.",27,NSFontWeightSemibold,RailInk()); _emptyTitle.alignment = NSTextAlignmentCenter; [_empty addSubview:_emptyTitle];
+  _emptySubtitle = RailLabel(@"Enter an address or search with ⌘ L.",14,NSFontWeightRegular,RailMuted()); _emptySubtitle.alignment = NSTextAlignmentCenter; [_empty addSubview:_emptySubtitle];
+  _retry = RailAction(@"Search or enter address",@"magnifyingglass",@"Focus address bar",^{ [weak focusAddress:nil]; }); _retry.normalFill = RailTint(RailRoleSelected); _retry.hoverFill = RailTint(RailRoleSelectedHover); _retry.ink = RailTint(RailRoleSelectedInk); _retry.centered = YES; [_empty addSubview:_retry];
   _home = [[ProjectsHomeView alloc] initWithFrame:NSZeroRect]; _home.hidden = YES; [_root addSubview:_home];
   _home.onAddProject = ^{ [weak newProject:nil]; };
   _home.onImportAzure = ^{ [weak importFromAzure:nil]; };
@@ -240,24 +278,34 @@ NSString *NormalizedAddress(NSString *input) {
   _reading.sidebar.hidden = YES; [_sidebar addSubview:_reading.sidebar];
   _readerChip = RailAction(@"Reader",nil,@"Showing this page in the reader",nil); _readerChip.centered = YES; _readerChip.font = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold]; _readerChip.ink = RailColor(0x245b96); _readerChip.normalFill = RailColor(0xd8e7f7); _readerChip.hoverFill = RailColor(0xd8e7f7); _readerChip.cornerRadius = 4; _readerChip.hidden = YES;
   if (_reading.loadProblem && !_statusMessage) _statusMessage = _reading.loadProblem;
+  _activity = [[ActivityView alloc] initWithFrame:NSZeroRect]; _activity.hidden = YES; [_root addSubview:_activity];
+  _activity.onCheckNow = ^{ [weak checkProjects:YES]; };
+  _activity.onSelect = ^(NSString *key) { BrowserController *strong = weak; if (strong) strong->_activitySelection = [key copy]; };
   _status = [[ProjectStatusService alloc] initWithContexts:^CefRefPtr<CefRequestContext>(NSString *session) { BrowserController *strong = weak; return strong ? [strong contextForSession:C(session)] : nullptr; }];
   _status.onChange = ^{ [weak statusChanged]; };
-  _statusbar = [[RailPanel alloc] init]; _statusbar.fill = RailColor(0xf4f6f8); [_root addSubview:_statusbar];
-  _statusLabel = RailLabel(@"",10,NSFontWeightRegular,RailColor(0x596879)); [_statusbar addSubview:_statusLabel];
-  _sessionLabel = RailLabel(@"",10,NSFontWeightRegular,RailColor(0x596879)); [_statusbar addSubview:_sessionLabel];
-  _spaceLabel = RailLabel(@"Work",14,NSFontWeightSemibold,RailColor(0x273445)); [_sidebar addSubview:_spaceLabel];
-  _spaceSubtitle = RailLabel(@"A little room for good work.",10,NSFontWeightRegular,RailColor(0x596879)); [_sidebar addSubview:_spaceSubtitle];
+  _statusbar = [[RailPanel alloc] init]; _statusbar.fill = RailTint(RailRoleShell); [_root addSubview:_statusbar];
+  _statusLabel = RailLabel(@"",10,NSFontWeightRegular,RailMuted()); [_statusbar addSubview:_statusLabel];
+  _sessionLabel = RailLabel(@"",10,NSFontWeightRegular,RailMuted()); [_statusbar addSubview:_sessionLabel];
+  // The wordmark sits level with the R in the rail; the Space's name follows below it.
+  _wordmark = RailLabel(@"Rail",17,NSFontWeightBold,RailInk()); _wordmark.accessibilityElement = NO; [_sidebar addSubview:_wordmark];
+  _spaceLabel = RailLabel(@"Work",13.5,NSFontWeightSemibold,RailInk()); [_sidebar addSubview:_spaceLabel];
   _sidebarToggle = RailAction(@"",@"sidebar.left",@"Hide sidebar (⌘ S)",^{ [weak toggleSidebar:nil]; }); [_sidebar addSubview:_sidebarToggle];
   _spaceOptions = RailAction(@"",@"ellipsis",@"Space options",^{ [weak spaceMenu:nil]; }); [_sidebar addSubview:_spaceOptions];
   _tabScroll = [[NSScrollView alloc] init]; _tabScroll.drawsBackground = NO; _tabScroll.hasVerticalScroller = YES; _tabScroll.autohidesScrollers = YES; _tabScroll.horizontalScrollElasticity = NSScrollElasticityNone;
-  _tabDocument = [[RailPanel alloc] init]; _tabDocument.fill = RailColor(0xedf1f5); _tabScroll.documentView = _tabDocument; [_sidebar addSubview:_tabScroll];
+  _tabDocument = [[RailPanel alloc] init]; _tabDocument.fill = RailTint(RailRoleSidebar); _tabScroll.documentView = _tabDocument; [_sidebar addSubview:_tabScroll];
   [_tabDocument registerForDraggedTypes:@[RailTabPasteboardType]];
   _tabDocument.onTabDragOver = ^NSDragOperation(NSString *tabID, NSPoint point) { BrowserController *strong = weak; return strong ? [strong tabDragOver:tabID at:point drop:NO] : NSDragOperationNone; };
   _tabDocument.onTabDrop = ^BOOL(NSString *tabID, NSPoint point) { BrowserController *strong = weak; return strong && [strong tabDragOver:tabID at:point drop:YES]!=NSDragOperationNone; };
   _tabDocument.onTabDragEnd = ^{ BrowserController *strong = weak; if (strong) strong->_dropIndicator.hidden = YES; };
-  _dropIndicator = [[RailPanel alloc] init]; _dropIndicator.fill = RailColor(0xe2ebf5); _dropIndicator.hidden = YES; _dropIndicator.wantsLayer = YES;
-  _dropIndicator.layer.cornerRadius = 8; _dropIndicator.layer.borderWidth = 1.5; _dropIndicator.layer.borderColor = RailColor(0x3976be).CGColor;
-  _sleepLabel = RailLabel(@"",10,NSFontWeightRegular,RailColor(0x596879)); [_sidebar addSubview:_sleepLabel];
+  [_rail registerForDraggedTypes:@[RailTabPasteboardType]];
+  _rail.onTabDragOver = ^NSDragOperation(NSString *tabID, NSPoint point) { BrowserController *strong = weak; return strong ? [strong railDragOver:tabID at:point drop:NO] : NSDragOperationNone; };
+  _rail.onTabDrop = ^BOOL(NSString *tabID, NSPoint point) { BrowserController *strong = weak; return strong && [strong railDragOver:tabID at:point drop:YES]!=NSDragOperationNone; };
+  _rail.onTabDragEnd = ^{ BrowserController *strong = weak; if (strong) strong->_railDropIndicator.hidden = YES; };
+  _railDropIndicator = [[RailPanel alloc] init]; _railDropIndicator.hidden = YES; _railDropIndicator.wantsLayer = YES;
+  _railDropIndicator.layer.cornerRadius = 9; _railDropIndicator.layer.borderWidth = 2; _railDropIndicator.layer.borderColor = RailTint(RailRoleFocus).CGColor;
+  _dropIndicator = [[RailPanel alloc] init]; _dropIndicator.fill = RailTint(RailRoleSelected); _dropIndicator.hidden = YES; _dropIndicator.wantsLayer = YES;
+  _dropIndicator.layer.cornerRadius = 8; _dropIndicator.layer.borderWidth = 1.5; _dropIndicator.layer.borderColor = RailTint(RailRoleFocus).CGColor;
+  _sleepLabel = RailLabel(@"",10,NSFontWeightRegular,RailMuted()); [_sidebar addSubview:_sleepLabel];
   _back = RailAction(@"",@"chevron.left",@"Back (⌘ [)",^{ [weak goBack:nil]; });
   _forward = RailAction(@"",@"chevron.right",@"Forward (⌘ ])",^{ [weak goForward:nil]; });
   _reload = RailAction(@"",@"arrow.clockwise",@"Reload (⌘ R)",^{ [weak reloadPage:nil]; });
@@ -267,7 +315,8 @@ NSString *NormalizedAddress(NSString *input) {
   _address = _addressBar.field;
   _address.placeholderString = @"Search or enter address"; _address.delegate = self; _address.target = self; _address.action = @selector(addressEntered:); _address.accessibilityLabel = @"Search or enter address";
   _downloadsButton = RailAction(@"",@"arrow.down.circle",@"Downloads",^{ [weak toggleDownloads:nil]; }); _downloadsButton.centered = YES; _downloadsButton.hidden = !_downloads.count; [_toolbar addSubview:_downloadsButton];
-  _sessionPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]; _sessionPicker.bordered = NO; _sessionPicker.font = [NSFont systemFontOfSize:11]; _sessionPicker.target = self; _sessionPicker.action = @selector(sessionChosen:); _sessionPicker.accessibilityLabel = @"Session for current tab"; [_toolbar addSubview:_sessionPicker];
+  _passwordButton = RailAction(@"",@"key",@"1Password (⇧ ⌘ P)",^{ [weak showPasswords:nil]; }); _passwordButton.centered=YES; [_toolbar addSubview:_passwordButton];
+  _sessionPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]; _sessionPicker.bordered = NO; _sessionPicker.font = RailFont(12,NSFontWeightMedium); _sessionPicker.menu.font = [NSFont menuFontOfSize:0]; _sessionPicker.target = self; _sessionPicker.action = @selector(sessionChosen:); _sessionPicker.accessibilityLabel = @"Session for current tab"; [_toolbar addSubview:_sessionPicker];
   _progress = [[NSProgressIndicator alloc] init]; _progress.style = NSProgressIndicatorStyleBar; _progress.indeterminate = YES; _progress.displayedWhenStopped = NO; [_toolbar addSubview:_progress];
   _sidebarHandle = [[RailResizeHandle alloc] init];
   _sidebarHandle.onBegin = ^{ BrowserController *strong = weak; if (strong) strong->_dragStartWidth = strong->_model.state.sidebarWidth; };
@@ -279,6 +328,20 @@ NSString *NormalizedAddress(NSString *input) {
   _tabSwitcher = [[RailSuggestionList alloc] init]; _tabSwitcher.hidden = YES;
   _tabSwitcher.onChoose = ^(NSInteger index) { BrowserController *strong = weak; if (!strong) return; strong->_tabSwitcher.selectedIndex = index; [strong finishTabSwitch:YES]; };
   [_root addSubview:_tabSwitcher];
+  _findBar = [[RailPanel alloc] init]; _findBar.hidden = YES; _findBar.fill = RailTint(RailRoleRaised);
+  _findBar.wantsLayer = YES; _findBar.layer.cornerRadius = 8; _findBar.layer.borderWidth = 1;
+  _findBar.layer.borderColor = RailLine().CGColor; [_root addSubview:_findBar];
+  _findField = [[NSTextField alloc] init]; _findField.font = RailFont(13,NSFontWeightRegular);
+  _findField.placeholderString = @"Find in page"; _findField.accessibilityLabel = @"Find in page";
+  _findField.textColor = RailInk(); _findField.backgroundColor = RailTint(RailRoleField);
+  _findField.delegate = self; [_findBar addSubview:_findField];
+  _findCount = RailLabel(@"",11,NSFontWeightRegular,RailMuted()); _findCount.alignment = NSTextAlignmentRight;
+  _findCount.accessibilityLabel = @"Find matches"; [_findBar addSubview:_findCount];
+  _findPrevious = RailAction(@"",@"chevron.up",@"Previous match (⇧ Enter)",^{ [weak findPrevious:nil]; });
+  _findNext = RailAction(@"",@"chevron.down",@"Next match (Enter)",^{ [weak findNext:nil]; });
+  _findClose = RailAction(@"",@"xmark",@"Close find (Esc)",^{ [weak closeFind:nil]; });
+  for (RailButton *button in @[_findPrevious,_findNext,_findClose]) { button.centered = YES; [_findBar addSubview:button]; }
+  _sidebarReveal = _model.state.sidebarVisible ? 1 : 0;
   [self installMenu]; [self refresh]; [self layout];
   [_window center]; [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
   [self ensureBrowser:_model.state.activeTabID];
@@ -316,9 +379,9 @@ NSString *NormalizedAddress(NSString *input) {
   (void)sender; NSURL *app=NSBundle.mainBundle.bundleURL; __weak BrowserController *weak=self;
   // macOS asks the user to confirm; https follows once http is accepted.
   [NSWorkspace.sharedWorkspace setDefaultApplicationAtURL:app toOpenURLsWithScheme:@"http" completionHandler:^(NSError *error) {
-    if (error) { dispatch_async(dispatch_get_main_queue(), ^{ [weak setStatus:@"Eimerrail was not set as the default browser."]; }); return; }
+    if (error) { dispatch_async(dispatch_get_main_queue(), ^{ [weak setStatus:@"Rail was not set as the default browser."]; }); return; }
     [NSWorkspace.sharedWorkspace setDefaultApplicationAtURL:app toOpenURLsWithScheme:@"https" completionHandler:^(NSError *httpsError) {
-      dispatch_async(dispatch_get_main_queue(), ^{ [weak setStatus:httpsError ? @"Eimerrail was not set as the default browser." : @"Eimerrail is now your default browser."]; });
+      dispatch_async(dispatch_get_main_queue(), ^{ [weak setStatus:httpsError ? @"Rail was not set as the default browser." : @"Rail is now your default browser."]; });
     }];
   }];
 }
@@ -334,7 +397,7 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)installMenu {
   NSMenu *bar = [[NSMenu alloc] init]; NSApp.mainMenu = bar;
-  NSArray *groups = @[@[@"Eimerrail",@[@"About Eimerrail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Eimerrail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Space Home",@"showHome:",@"H"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"]]];
+  NSArray *groups = @[@[@"Rail",@[@"About Rail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Rail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Projects",@"showHome:",@"H"],@[@"Activity",@"showActivity:",@"A"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"1Password…",@"showPasswords:",@"P"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"],@[@"Dock Developer Tools",@"toggleDevToolsDock:",@"D"]]];
   for (NSArray *group in groups) {
     NSMenuItem *top = [[NSMenuItem alloc] initWithTitle:group[0] action:nil keyEquivalent:@""];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:group[0]]; top.submenu = menu; [bar addItem:top];
@@ -342,35 +405,45 @@ NSString *NormalizedAddress(NSString *input) {
       NSArray *entry = group[i]; SEL action = NSSelectorFromString(entry[1]);
       NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:entry[0] action:action keyEquivalent:entry[2]];
       if (action==@selector(showDevTools:)) item.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption;
+      if (action==@selector(toggleDevToolsDock:)) item.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption|NSEventModifierFlagShift;
       item.target = [self respondsToSelector:action] ? self : nil; [menu addItem:item];
     }
+  }
+  NSMenu *edit = [bar itemWithTitle:@"Edit"].submenu;
+  for (NSArray *entry in @[@[@"Find Next",@"findNext:",@"g"],@[@"Find Previous",@"findPrevious:",@"G"]]) {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:entry[0] action:NSSelectorFromString(entry[1]) keyEquivalent:entry[2]];
+    item.target = self; [edit addItem:item];
   }
 }
 - (void)layout {
   CGFloat w = _root.bounds.size.width, h = _root.bounds.size.height;
   // The sidebar, rail and Space home are laid out at the small size and drawn larger.
   CGFloat scale = rail::BrowserModel::controlScale(_model.state.controlSize);
-  for (RailPanel *panel in @[_rail,_sidebar,_home]) panel.contentScale = scale;
+  for (RailPanel *panel in @[_rail,_sidebar,_home,_activity]) panel.contentScale = scale;
   _rail.titlebarHeight = _sidebar.titlebarHeight = 51/scale;
-  CGFloat rail = _model.state.sidebarVisible ? round(45*scale) : 0, side = _model.state.sidebarVisible ? round([self shownSidebarWidth]*scale) : 0, left = rail + side;
-  _rail.hidden = !_model.state.sidebarVisible; _sidebar.hidden = !_model.state.sidebarVisible;
-  _rail.frame = NSMakeRect(0,0,rail,h); _sidebar.frame = NSMakeRect(rail,0,side,h);
-  CGFloat sideH = _sidebar.bounds.size.height, railH = _rail.bounds.size.height; side = _model.state.sidebarVisible ? [self shownSidebarWidth] : 0;
-  _toolbar.frame = NSMakeRect(left,0,w-left,51); _webHost.frame = NSMakeRect(left,51,w-left,h-77); _empty.frame = NSMakeRect(left,51,w-left,h-77); _home.frame = NSMakeRect(left,51,w-left,h-77); _reading.reader.frame = NSMakeRect(left,51,w-left,h-77);
+  // While the sidebar animates, the rail and sidebar keep their width and slide in from the left edge.
+  CGFloat reveal = _sidebarReveal, rail = round(45*scale), side = round([self shownSidebarWidth]*scale), left = round((rail+side)*reveal), slide = left-rail-side;
+  _rail.hidden = _sidebar.hidden = reveal <= 0;
+  _rail.alphaValue = _sidebar.alphaValue = _model.state.sidebarAnimation=="subtle" ? reveal : 1;
+  _rail.frame = NSMakeRect(slide,0,rail,h); _sidebar.frame = NSMakeRect(slide+rail,0,side,h);
+  CGFloat sideH = _sidebar.bounds.size.height, railH = _rail.bounds.size.height; side = [self shownSidebarWidth];
+  _toolbar.frame = NSMakeRect(left,0,w-left,51); _webHost.frame = NSMakeRect(left,51,w-left,h-77); _empty.frame = NSMakeRect(left,51,w-left,h-77); _home.frame = NSMakeRect(left,51,w-left,h-77); _activity.frame = _home.frame; _reading.reader.frame = _home.frame;
   _statusbar.frame = NSMakeRect(left,h-26,w-left,26);
-  _spaceLabel.frame = NSMakeRect(15,62,side-55,23); _spaceSubtitle.frame = NSMakeRect(15,91,side-25,16);
+  _wordmark.frame = NSMakeRect(15,57,side-30,24); _spaceLabel.frame = NSMakeRect(15,89,side-55,20);
   // Centered on the toolbar's buttons, whatever the size.
-  _sidebarToggle.frame = NSMakeRect(side-39,25/scale-14,28,28); _spaceOptions.frame = NSMakeRect(side-39,61,28,28);
+  _sidebarToggle.frame = NSMakeRect(side-39,25/scale-14,28,28); _spaceOptions.frame = NSMakeRect(side-39,85,28,28);
   _tabScroll.frame = NSMakeRect(0,117,side,MAX(0,sideH-160)); _sleepLabel.frame = NSMakeRect(13,sideH-29,side-25,17);
   _reading.sidebar.frame = NSMakeRect(0,58,side,MAX(0,sideH-58));
-  _sidebarHandle.hidden = !_model.state.sidebarVisible || _readingVisible; _sidebarHandle.frame = NSMakeRect(left-3,0,6,h);
-  CGFloat x = _model.state.sidebarVisible ? 7 : 86;
-  _toggle.hidden = _model.state.sidebarVisible;
-  if (!_toggle.hidden) { _toggle.frame = NSMakeRect(x,11,28,28); x += 31; }
+  _sidebarHandle.hidden = !_model.state.sidebarVisible || reveal < 1 || _readingVisible; _sidebarHandle.frame = NSMakeRect(left-3,0,6,h);
+  // The show-sidebar button fades in beside the window buttons as the sidebar leaves.
+  CGFloat x = 7 + 79*(1-reveal);
+  _toggle.hidden = reveal >= 1; _toggle.alphaValue = 1-reveal;
+  _toggle.frame = NSMakeRect(x,11,28,28); x += 31*(1-reveal);
   _back.frame = NSMakeRect(x,11,27,28); _forward.frame = NSMakeRect(x+28,11,27,28); _reload.frame = NSMakeRect(x+56,11,27,28); x += 92;
   CGFloat tw = _toolbar.bounds.size.width;
   CGFloat downloads = _downloadsButton.hidden ? 0 : 34;
-  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-(_sessionPicker.hidden && !downloads ? 10 : 133)-downloads),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
+  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-(_sessionPicker.hidden ? 44 : 167)-downloads),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
+  _passwordButton.frame = NSMakeRect(tw-157-downloads,11,28,28);
   _downloadsButton.frame = NSMakeRect(tw-157,11,28,28);
   _progress.frame = NSMakeRect(0,48,tw,3);
   _readerChip.frame = NSMakeRect(_addressBar.bounds.size.width-58,6,52,18);
@@ -379,8 +452,16 @@ NSString *NormalizedAddress(NSString *input) {
   CGFloat ew = _empty.bounds.size.width, ey = MAX(80,_empty.bounds.size.height*.32);
   _emptyTitle.frame = NSMakeRect(30,ey,ew-60,40); _emptySubtitle.frame = NSMakeRect(35,ey+52,ew-70,45); _emptySubtitle.maximumNumberOfLines = 2;
   _retry.frame = NSMakeRect((ew-220)/2,ey+112,220,34);
-  for (auto &[id,slot] : _runtime) { (void)id; slot.container.frame = _webHost.bounds; for (NSView *child in slot.container.subviews) child.frame = slot.container.bounds; }
-  CGFloat start = _model.state.sidebarVisible ? MAX(60,rail+15) : 16;
+  for (auto &[id,slot] : _runtime) { (void)id; [self layoutRuntime:slot]; }
+  auto findSlot = _runtime.find(_model.state.activeTabID);
+  CGFloat tools = findSlot == _runtime.end() ? 0 : [self dockedDevToolsWidth:findSlot->second];
+  CGFloat findWidth = MIN(390,MAX(0,tw-tools-16));
+  _findBar.frame = NSMakeRect(w-tools-findWidth-8,57,findWidth,44);
+  _findField.frame = NSMakeRect(10,9,MAX(0,findWidth-174),26);
+  _findCount.frame = NSMakeRect(findWidth-158,14,56,17);
+  _findPrevious.frame = NSMakeRect(findWidth-96,8,28,28);
+  _findNext.frame = NSMakeRect(findWidth-66,8,28,28); _findClose.frame = NSMakeRect(findWidth-36,8,28,28);
+  CGFloat start = 16 + (MAX(60,rail+15)-16)*reveal;
   for (NSUInteger i=0;i<3;i++) {
     NSButton *button = [_window standardWindowButton:(NSWindowButton)i];
     NSRect f = button.frame; f.origin.x = start + i*20; f.origin.y = button.superview.bounds.size.height - 29; button.frame = f;
@@ -391,84 +472,108 @@ NSString *NormalizedAddress(NSString *input) {
   if (rail::BrowserModel::isIsolatedSession(sessionID)) return @"Isolated";
   const auto *session = _model.session(sessionID); return session ? S(session->name) : @"Work";
 }
-- (NSColor *)sessionInk:(const std::string &)sessionID {
-  return RailColor(rail::BrowserModel::isIsolatedSession(sessionID) ? 0x7a5838 : sessionID == "personal" ? 0x476d4e : 0x3c5f88);
+// Session markers: 0 work and other named sessions, 1 personal, 2 isolated.
+- (NSInteger)sessionStyle:(const std::string &)sessionID {
+  return rail::BrowserModel::isIsolatedSession(sessionID) ? 2 : sessionID == "personal" ? 1 : 0;
 }
 - (void)refresh {
   if (!_window) return;
   __weak BrowserController *weak = self;
   for (NSView *v in [_rail.subviews copy]) [v removeFromSuperview];
-  NSImageView *logo = [[NSImageView alloc] initWithFrame:NSMakeRect(13,15,19,19)]; logo.image = RailSymbol(@"square.stack.3d.up",17); logo.contentTintColor = RailColor(0x587089); [_rail addSubview:logo];
-  CGFloat ry = 89;
+  NSImageView *logo = [[NSImageView alloc] initWithFrame:NSMakeRect(8,55,28,28)]; logo.image = RailMarkImage(); logo.imageScaling = NSImageScaleProportionallyUpOrDown;
+  logo.accessibilityLabel = @"Rail"; [_rail addSubview:logo];
+  CGFloat ry = 97;
   for (size_t index=0;index<_model.state.spaces.size();index++) {
     const auto &space = _model.state.spaces[index]; std::string sid = space.id;
     NSString *symbol = [self symbolForSpace:space index:index];
     RailButton *button = RailAction(@"",symbol,S(space.name),^{ BrowserController *strong = weak; if (!strong) return; strong->_homeVisible = NO; strong->_readingVisible = NO; strong->_model.selectSpace(sid,Now()); [strong ensureBrowser:strong->_model.state.activeTabID]; [strong refresh]; [strong saveSoon]; });
-    button.centered = YES; button.frame = NSMakeRect(6,ry,32,32); button.ink = RailColor(0x596879);
-    if (space.id == _model.state.activeSpaceID && !_readingVisible) { button.normalFill = RailColor(0x4173aa); button.hoverFill = RailColor(0x37679c); button.ink = NSColor.whiteColor; }
+    button.centered = YES; button.frame = NSMakeRect(6,ry,32,32); button.ink = RailMuted(); button.tag = 1000+(NSInteger)index;
+    if (space.id == _model.state.activeSpaceID && !_readingVisible) {
+      button.normalFill = RailTint(RailRoleSpaceActive); button.hoverFill = RailTint(RailRoleSpaceActiveHover); button.ink = RailTint(RailRoleSpaceActiveInk);
+      button.accessibilityValue = @"Current Space";
+      // A short bar at the rail's edge marks the current Space, alongside the filled tile.
+      RailPanel *marker = [[RailPanel alloc] initWithFrame:NSMakeRect(0,ry+8,3,16)]; marker.fill = RailTint(RailRoleSpaceActive);
+      marker.wantsLayer = YES; marker.layer.cornerRadius = 1.5; marker.layer.maskedCorners = kCALayerMaxXMinYCorner|kCALayerMaxXMaxYCorner; [_rail addSubview:marker];
+    }
     [_rail addSubview:button]; ry += 41;
   }
+  [_rail addSubview:_railDropIndicator];
   [self addReadingEntryAt:ry];
   RailButton *addSpace = RailAction(@"",@"plus",@"New Space",^{ [weak newSpace:nil]; }); addSpace.centered = YES; addSpace.tag = 900; [_rail addSubview:addSpace];
   RailButton *settings = RailAction(@"",@"slider.horizontal.3",@"Settings",^{ [weak showSettings:nil]; }); settings.centered = YES; settings.tag = 901; [_rail addSubview:settings];
   const auto *space = _model.space(_model.state.activeSpaceID);
   _spaceLabel.stringValue = space ? S(space->name) : @"Space";
-  _spaceSubtitle.stringValue = @"A little room for good work.";
   NSPoint offset = _tabScroll.contentView.bounds.origin; CGFloat side = _model.state.sidebarWidth, pinWidth = floor((side-30)/2);
   for (NSView *v in [_tabDocument.subviews copy]) [v removeFromSuperview];
   [_tabDocument addSubview:_dropIndicator];
   CGFloat y = 4; NSUInteger pins = 0, sleeping = 0;
   {
-    RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,32)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=_homeVisible ? RailColor(0xd8e7f7) : nil;
-    RailButton *home = RailAction([NSString stringWithFormat:@"%@ home",space ? S(space->name) : @"Space"],@"square.grid.2x2",@"Projects in this Space (⌘ ⇧ H)",^{ [weak showHome:nil]; });
-    home.frame = NSMakeRect(0,0,side-14,32); home.font = [NSFont systemFontOfSize:12 weight:_homeVisible ? NSFontWeightSemibold : NSFontWeightRegular]; home.ink = RailColor(_homeVisible ? 0x245b96 : 0x273445); [row addSubview:home];
-    NSUInteger attention = [self attentionCountInSpace:_model.state.activeSpaceID];
-    if (attention) {
-      RailButton *count = RailAction([NSString stringWithFormat:@"%lu",(unsigned long)attention],nil,[NSString stringWithFormat:@"%lu project%@ need%@ attention",(unsigned long)attention,attention==1 ? @"" : @"s",attention==1 ? @"s" : @""],^{ [weak showHome:nil]; });
-      count.font=[NSFont systemFontOfSize:9.5 weight:NSFontWeightBold]; count.centered=YES; count.cornerRadius=8; count.normalFill=RailColor(0xd9533f); count.hoverFill=RailColor(0xc4452f); count.ink=NSColor.whiteColor;
-      count.frame=NSMakeRect(side-14-30,8,20,16); [row addSubview:count];
+    // The Space's two pages: its projects and the user's own pull requests.
+    NSUInteger attention = [self attentionCountInSpace:_model.state.activeSpaceID], needsYou = [self activityCountInSpace:_model.state.activeSpaceID];
+    NSArray *pages = @[@[@"Projects",@"square.grid.2x2",@"Projects in this Space (⌘ ⇧ H)",@(attention),@"project%@ need%@ attention"],
+                       @[@"Activity",@"arrow.triangle.pull",@"Your pull requests and their checks (⌘ ⇧ A)",@(needsYou),@"pull request%@ need%@ you"]];
+    for (NSInteger page = 0; page < 2; page++) {
+      NSArray *entry = pages[page]; BOOL current = _homeVisible && _homePage == page; NSUInteger count = [entry[3] unsignedIntegerValue];
+      RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,32)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=current ? RailTint(RailRoleSelected) : nil;
+      void (^open)(void) = page == 0 ? ^{ [weak showHome:nil]; } : ^{ [weak showActivity:nil]; };
+      RailButton *button = RailAction(entry[0],entry[1],entry[2],open);
+      button.frame = NSMakeRect(0,0,side-14,32); button.font = RailFont(12,current ? NSFontWeightSemibold : NSFontWeightRegular); button.ink = current ? RailTint(RailRoleSelectedInk) : RailInk();
+      button.normalFill = NSColor.clearColor; button.hoverFill = current ? NSColor.clearColor : RailTint(RailRoleHover); [row addSubview:button];
+      if (count) {
+        NSString *help = [NSString stringWithFormat:@"%lu %@",(unsigned long)count,[NSString stringWithFormat:entry[4],count==1 ? @"" : @"s",count==1 ? @"s" : @""]];
+        RailButton *badge = RailAction([NSString stringWithFormat:@"%lu",(unsigned long)count],nil,help,open);
+        // Drawn like the session markers below it: same size, radius and column, tinted rather than solid.
+        badge.font=RailDigitsFont(9.5,NSFontWeightSemibold); badge.centered=YES; badge.cornerRadius=4;
+        badge.normalFill=RailTint(RailRoleCriticalFill); badge.hoverFill=[RailTint(RailRoleCriticalFill) blendedColorWithFraction:.12 ofColor:RailTint(RailRoleCriticalInk)]; badge.ink=RailTint(RailRoleCriticalInk);
+        CGFloat badgeWidth=MAX(17,ceil([badge.title sizeWithAttributes:@{NSFontAttributeName:badge.font}].width)+9);
+        badge.frame=NSMakeRect(side-20-badgeWidth,7.5,badgeWidth,17); [row addSubview:badge];
+      }
+      [_tabDocument addSubview:row]; y += 34;
     }
-    [_tabDocument addSubview:row]; y += 42;
+    y += 8;
   }
   for (const auto &t : _model.state.tabs) if (t.spaceID == _model.state.activeSpaceID && !_runtime.count(t.id) && t.url != "about:blank") sleeping++;
-  NSTextField *pinHeading = RailLabel(@"Pinned",10,NSFontWeightMedium,RailColor(0x596879)); pinHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:pinHeading]; y += 24;
+  NSTextField *pinHeading = RailLabel(@"Pinned",10,NSFontWeightSemibold,RailMuted()); pinHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:pinHeading]; y += 24;
   for (const auto &tab : _model.state.tabs) {
     if (tab.spaceID != _model.state.activeSpaceID || !tab.pinned) continue;
     std::string tid = tab.id;
     RailButton *button = RailAction(S(tab.shownTitle()),SymbolForURL(tab.url),S(tab.shownTitle()),^{ [weak selectTabID:tid]; });
     [self applyFaviconFor:tab.url button:button sleeping:!_runtime.count(tid) && tab.url != "about:blank"]; button.dragTabID = S(tid);
     button.onDoubleClick = ^{ [weak renameTabID:tid]; };
-    button.font = [NSFont systemFontOfSize:11]; button.frame = NSMakeRect(12+(pins%2)*(pinWidth+6),y+(pins/2)*42,pinWidth,36);
-    button.normalFill = RailColor(tab.id == _model.state.activeTabID && !_homeVisible ? 0xd4e4f6 : 0xf8fafc); button.stroke = RailColor(0xd4dde5);
-    button.ink = RailColor(_runtime.count(tab.id) || tab.url == "about:blank" ? 0x273445 : 0x596879);
+    BOOL selectedPin = tab.id == _model.state.activeTabID && !_homeVisible;
+    button.font = RailFont(11,selectedPin ? NSFontWeightSemibold : NSFontWeightRegular); button.frame = NSMakeRect(12+(pins%2)*(pinWidth+6),y+(pins/2)*42,pinWidth,36);
+    button.normalFill = RailTint(selectedPin ? RailRoleSelected : RailRolePin); button.hoverFill = RailTint(selectedPin ? RailRoleSelectedHover : RailRoleHover); button.stroke = RailTint(selectedPin ? RailRoleSelected : RailRoleLine);
+    button.ink = selectedPin ? RailTint(RailRoleSelectedInk) : _runtime.count(tab.id) || tab.url == "about:blank" ? RailInk() : RailMuted();
     button.toolTip = [NSString stringWithFormat:@"%@ · %@%@",S(tab.shownTitle()),[self sessionName:tab.sessionID],_runtime.count(tab.id) ? @"" : @" · Reloads on open"];
     button.menu = [self menuForTab:tid]; [_tabDocument addSubview:button]; pins++;
   }
   if (pins) y += ((pins+1)/2)*42 + 12;
-  else { NSTextField *hint = RailLabel(@"Drag a tab here to pin it.",10,NSFontWeightRegular,RailColor(0x596879)); hint.frame=NSMakeRect(15,y,side-30,18); [_tabDocument addSubview:hint]; y += 35; }
+  else { NSTextField *hint = RailLabel(@"Drag a tab here to pin it.",10,NSFontWeightRegular,RailMuted()); hint.frame=NSMakeRect(15,y,side-30,18); [_tabDocument addSubview:hint]; y += 35; }
   _pinnedSectionEnd = y;
-  NSTextField *tabHeading = RailLabel(@"Tabs",10,NSFontWeightMedium,RailColor(0x596879)); tabHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:tabHeading]; y += 23;
+  NSTextField *tabHeading = RailLabel(@"Tabs",10,NSFontWeightSemibold,RailMuted()); tabHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:tabHeading]; y += 23;
   for (const auto &tab : _model.state.tabs) {
     if (tab.spaceID != _model.state.activeSpaceID || tab.pinned) continue;
     std::string tid = tab.id; BOOL selected = tid == _model.state.activeTabID && !_homeVisible;
-    RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,35)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=selected ? RailColor(0xd8e7f7) : nil; row.menu=[self menuForTab:tid];
+    RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,35)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=selected ? RailTint(RailRoleSelected) : nil; row.menu=[self menuForTab:tid];
     BOOL sleepingTab = !_runtime.count(tid) && tab.url != "about:blank";
     RailButton *button = RailAction(S(tab.title),sleepingTab ? @"moon" : SymbolForURL(tab.url),[NSString stringWithFormat:@"%@%@",S(tab.title),sleepingTab ? @", unloaded; reload on open" : @""],^{ [weak selectTabID:tid]; });
     [self applyFaviconFor:tab.url button:button sleeping:sleepingTab]; button.dragTabID = S(tid); button.dragView = row;
-    button.frame = NSMakeRect(0,0,side-40,35); button.font=[NSFont systemFontOfSize:12 weight:selected ? NSFontWeightSemibold : NSFontWeightRegular]; button.ink=RailColor(selected ? 0x245b96 : sleepingTab ? 0x596879 : 0x273445); button.menu=row.menu; [row addSubview:button];
+    button.frame = NSMakeRect(0,0,side-40,35); button.font=RailFont(12,selected ? NSFontWeightSemibold : NSFontWeightRegular); button.ink=selected ? RailTint(RailRoleSelectedInk) : sleepingTab ? RailMuted() : RailInk();
+    if (selected) button.hoverFill=RailTint(RailRoleSelectedHover); button.menu=row.menu; [row addSubview:button];
     NSString *sessionName = [self sessionName:tab.sessionID]; NSString *initial = sessionName.length ? [[sessionName substringToIndex:1] uppercaseString] : @"W";
     RailButton *badge = RailAction(initial,nil,[NSString stringWithFormat:@"%@ session; change session",sessionName],nil);
     __weak RailButton *weakBadge = badge; badge.handler = ^{ [weak showSessionMenuForTab:tid from:weakBadge]; };
-    badge.frame=NSMakeRect(side-37,9,17,17); badge.font=[NSFont systemFontOfSize:9 weight:NSFontWeightSemibold]; badge.centered=YES; badge.cornerRadius=4; badge.ink=[self sessionInk:tab.sessionID];
-    badge.normalFill=RailColor(rail::BrowserModel::isIsolatedSession(tab.sessionID) ? 0xeee2d5 : tab.sessionID=="personal" ? 0xdeebdf : 0xdae6f4); [row addSubview:badge];
+    badge.frame=NSMakeRect(side-37,9,17,17); badge.font=RailFont(9,NSFontWeightBold); badge.centered=YES; badge.cornerRadius=4;
+    NSInteger style=[self sessionStyle:tab.sessionID]; badge.ink=RailSessionInk(style); badge.normalFill=RailSessionFill(style);
+    badge.hoverFill=[RailSessionFill(style) blendedColorWithFraction:.15 ofColor:RailSessionInk(style)]; [row addSubview:badge];
     // A close button appears left of the session badge while the pointer is over the row.
     RailButton *close = RailAction(@"",nil,@"Close tab (⌘ W)",^{ [weak closeTabID:tid]; }); close.image=RailSymbol(@"xmark",10);
-    close.frame=NSMakeRect(side-59,8,19,19); close.centered=YES; close.cornerRadius=5; close.ink=RailColor(0x596879); close.hoverFill=RailColor(selected ? 0xc4d8ee : 0xdde4ec); close.hidden=YES; [row addSubview:close];
+    close.frame=NSMakeRect(side-59,8,19,19); close.centered=YES; close.cornerRadius=5; close.ink=RailMuted(); close.hoverFill=RailTint(selected ? RailRoleSelectedHover : RailRolePressed); close.hidden=YES; [row addSubview:close];
     __weak RailButton *weakTitle = button, *weakClose = close;
     row.onHoverChange = ^(BOOL hovered) { weakClose.hidden=!hovered; NSRect frame=weakTitle.frame; frame.size.width=side-(hovered ? 62 : 40); weakTitle.frame=frame; };
     [_tabDocument addSubview:row]; y += 38;
   }
-  RailButton *newTab = RailAction(@"New tab",@"plus",@"New tab (⌘ T)",^{ [weak newTab:nil]; }); newTab.ink=RailColor(0x596879); newTab.frame=NSMakeRect(9,y+8,side-18,33); [_tabDocument addSubview:newTab]; y += 54;
+  RailButton *newTab = RailAction(@"New tab",@"plus",@"New tab (⌘ T)",^{ [weak newTab:nil]; }); newTab.ink=RailMuted(); newTab.frame=NSMakeRect(9,y+8,side-18,33); [_tabDocument addSubview:newTab]; y += 54;
   // Fill the visible area exactly; a fraction more makes a scaled sidebar show a scroller that narrows the rows.
   _tabDocument.frame=NSMakeRect(0,0,side,MAX(y,floor(_tabScroll.contentView.bounds.size.height))); [_tabScroll.contentView scrollToPoint:NSMakePoint(0,MIN(offset.y,MAX(0,y-_tabScroll.contentSize.height)))];
   _sleepLabel.stringValue=[NSString stringWithFormat:@"%lu asleep · after %.0f min",(unsigned long)sleeping,_model.state.idleMinutes];
@@ -480,19 +585,19 @@ NSString *NormalizedAddress(NSString *input) {
   if (active) {
     for (NSMenuItem *item in _sessionPicker.itemArray) if ([item.representedObject isEqual:S(active->sessionID)] || (rail::BrowserModel::isIsolatedSession(active->sessionID) && [item.representedObject isEqual:@"__isolated__"])) [_sessionPicker selectItem:item];
     _sessionLabel.stringValue = [NSString stringWithFormat:@"%@ session",[self sessionName:active->sessionID]];
-    if (!_editingAddress) { _address.stringValue = _homeVisible ? @"" : DisplayAddress(active->url); _addressBar.symbolName = _homeVisible ? @"square.grid.2x2" : AddressSymbol(active->url); }
-    if (!_editingAddress && _homeVisible) _address.placeholderString = [NSString stringWithFormat:@"%@ home — search or enter address",space ? S(space->name) : @"Space"];
+    if (!_editingAddress) { _address.stringValue = _homeVisible ? @"" : DisplayAddress(active->url); _addressBar.symbolName = _homeVisible ? (_homePage == 1 ? @"arrow.triangle.pull" : @"square.grid.2x2") : AddressSymbol(active->url); }
+    if (!_editingAddress && _homeVisible) _address.placeholderString = [NSString stringWithFormat:@"%@ · %@ — search or enter address",space ? S(space->name) : @"Space",_homePage == 1 ? @"Activity" : @"Projects"];
     else _address.placeholderString = @"Search or enter address";
-    _window.title = _homeVisible ? [NSString stringWithFormat:@"%@ home — Eimerrail",space ? S(space->name) : @"Space"] : [NSString stringWithFormat:@"%@ — Eimerrail",S(active->title)];
+    _window.title = _homeVisible ? [NSString stringWithFormat:@"%@ · %@ — Rail",space ? S(space->name) : @"Space",_homePage == 1 ? @"Activity" : @"Projects"] : [NSString stringWithFormat:@"%@ — Rail",S(active->title)];
   }
   auto slot = _runtime.find(_model.state.activeTabID);
   const BOOL covered=_homeVisible || _readingVisible;
   _back.enabled=!covered && slot!=_runtime.end() && slot->second.back; _forward.enabled=!covered && slot!=_runtime.end() && slot->second.forward;
   if (!covered && slot!=_runtime.end() && slot->second.loading) [_progress startAnimation:nil]; else [_progress stopAnimation:nil];
-  for (auto &[id,runtime] : _runtime) runtime.container.hidden = covered || id != _model.state.activeTabID;
+  for (auto &[id,runtime] : _runtime) { runtime.container.hidden = covered || id != _model.state.activeTabID; [self placeDevTools:runtime]; }
   BOOL error = slot!=_runtime.end() && !slot->second.error.empty();
   _empty.hidden = covered || (active && active->url!="about:blank" && !error);
-  _home.hidden = !_homeVisible; if (_homeVisible) [self refreshHome];
+  _home.hidden = !_homeVisible || _homePage != 0; _activity.hidden = !_homeVisible || _homePage != 1; if (_homeVisible) [self refreshHome];
   if (error) {
     _emptyTitle.stringValue=@"Couldn't load this page."; _emptySubtitle.stringValue=S(slot->second.error); _retry.title=@"Try again"; _retry.image=RailSymbol(@"arrow.clockwise",15); _retry.handler=^{ [weak reloadPage:nil]; };
   } else {
@@ -500,6 +605,7 @@ NSString *NormalizedAddress(NSString *input) {
   }
   [self refreshReadingChrome];
   _statusLabel.stringValue = _statusMessage.length ? _statusMessage : [NSString stringWithFormat:@"Idle tabs unload after %.0f min",_model.state.idleMinutes];
+  [self refreshFindBar];
   [self layout];
 }
 - (NSMenu *)menuForTab:(const std::string &)tabID {
@@ -518,6 +624,7 @@ NSString *NormalizedAddress(NSString *input) {
   return menu;
 }
 - (void)selectTabID:(const std::string &)tabID {
+  if (tabID!=_passwordTab) [_passwordPalette invalidatePage];
   if (_quitting || !_model.selectTab(tabID,Now())) return;
   _homeVisible=NO; _readingVisible=NO;
   _statusMessage=nil; [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
@@ -548,6 +655,20 @@ NSString *NormalizedAddress(NSString *input) {
   if (!CefBrowserHost::CreateBrowser(info,client,tab->url,settings,nullptr,context)) {
     [slot.container removeFromSuperview]; _runtime.erase(tabID); [self setStatus:@"Couldn't create the browser. Try opening the tab again."];
   }
+}
+- (void)openLinkFrom:(const std::string &)source generation:(uint64_t)generation url:(NSString *)url background:(BOOL)background {
+  auto runtime=_runtime.find(source); const auto *opener=_model.tab(source);
+  if (_quitting || !opener || runtime==_runtime.end() || runtime->second.generation!=generation || runtime->second.closeReason!=CloseReason::None) return;
+  const std::string space=opener->spaceID,session=opener->sessionID,selected=_model.state.activeTabID;
+  const std::string ruled=_model.spaceForURL(C(url));
+  const bool routed=!ruled.empty() && ruled!=space;
+  std::string tabID=_model.addTab(routed ? ruled : space,C(url),Now(),routed ? "" : session);
+  if (tabID.empty()) return;
+  if (!routed && rail::BrowserModel::isIsolatedSession(session)) _model.setIsolated(tabID);
+  if (background) {
+    // addTab selects by default; restore selection before creating the hidden page.
+    _model.selectTab(selected,Now()); [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
+  } else [self selectTabID:tabID];
 }
 - (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client {
   const auto *opener=_model.tab(source); if (!opener || _quitting) return NO;
@@ -592,6 +713,7 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)closeRuntime:(const std::string &)tabID reason:(CloseReason)reason session:(const std::string &)session {
   auto it=_runtime.find(tabID); if (it==_runtime.end()) return;
+  [self cancelExternalAppPromptForTab:tabID generation:it->second.generation];
   it->second.closeReason=reason; it->second.nextSession=session;
   if (it->second.browser) it->second.browser->GetHost()->CloseBrowser(false);
 }
@@ -604,6 +726,7 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (void)browserClosed:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
+  [self cancelExternalAppPromptForTab:tabID generation:generation];
   CloseReason reason=it->second.closeReason; std::string nextSession=it->second.nextSession, pendingURL=it->second.pendingURL;
   const bool wasActive=tabID==_model.state.activeTabID;
   [it->second.container removeFromSuperview]; _runtime.erase(it);
@@ -641,6 +764,8 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)updateURL:(NSString *)url tab:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); auto *tab=_model.tab(tabID);
   if (!tab || it==_runtime.end() || it->second.generation!=generation) return;
+  if (tabID==_passwordTab && ![url isEqual:_passwordURL]) [self passwordPageNavigating:tabID generation:generation];
+  if (tab->url!=C(url)) [self cancelExternalAppPromptForTab:tabID generation:generation];
   tab->url=C(url); it->second.error.clear();
   // Isolated tabs stay out of history so they leave no trace in suggestions.
   if (!rail::BrowserModel::isIsolatedSession(tab->sessionID)) { _history.recordVisit(tab->url,Now()); _historyDirty=YES; }
@@ -681,12 +806,77 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)updateLoading:(BOOL)loading back:(BOOL)back forward:(BOOL)forward tab:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
   it->second.loading=loading; it->second.back=back; it->second.forward=forward;
-  if (loading) it->second.error.clear(); [self refresh];
+  if (loading) {
+    it->second.error.clear();
+    if (it->second.browser) it->second.browser->GetHost()->StopFinding(true);
+    it->second.findPending=false; it->second.findCount=it->second.findOrdinal=0;
+  } else if (it->second.findVisible && !it->second.findText.empty() && it->second.browser) {
+    it->second.findPending=true;
+    it->second.browser->GetHost()->Find(it->second.findText,true,false,true);
+  }
+  [self refresh];
 }
 - (void)loadFailed:(NSString *)message tab:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
   it->second.error=C(message); it->second.loading=false; [self refresh];
 }
+#pragma mark External applications
+- (void)cancelExternalAppPromptForTab:(const std::string &)tabID generation:(uint64_t)generation {
+  if (!_externalAppPrompt || _externalAppPromptTab!=tabID || _externalAppPromptGeneration!=generation) return;
+  [_window endSheet:_externalAppPrompt.window returnCode:NSModalResponseCancel];
+  _externalAppPrompt=nil;
+}
+- (void)requestExternalAppURL:(NSString *)address fromPage:(NSString *)page tab:(const std::string &)tabID generation:(uint64_t)generation {
+  auto it=_runtime.find(tabID);
+  if (_quitting || it==_runtime.end() || it->second.generation!=generation || it->second.closeReason!=CloseReason::None) return;
+  if (!RailIsExternalAppURL(C(address))) { [self setStatus:@"This address type is not supported."]; return; }
+  // One prompt at a time; redirects or repeated script attempts cannot queue dialogs.
+  if (_window.attachedSheet || _externalAppPrompt) return;
+  NSURL *url=[NSURL URLWithString:address];
+  NSWorkspace *workspace=NSWorkspace.sharedWorkspace;
+  NSURL *application=[workspace URLForApplicationToOpenURL:url];
+  NSBundle *bundle=application ? [NSBundle bundleWithURL:application] : nil;
+  if (!application || [bundle.bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier]) {
+    [self setStatus:[NSString stringWithFormat:@"No application is available to open %@ links.",url.scheme]]; return;
+  }
+  NSString *name=[bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: [bundle objectForInfoDictionaryKey:@"CFBundleName"];
+  if (!name.length) name=[[NSFileManager.defaultManager displayNameAtPath:application.path] stringByDeletingPathExtension];
+  // Show only the requesting origin. Auth codes, state and other callback
+  // credentials stay out of the prompt, browser history and saved tab URL.
+  NSURLComponents *source=[NSURLComponents componentsWithString:page];
+  NSString *origin=@"This page";
+  if ([@[@"https",@"http"] containsObject:source.scheme.lowercaseString] && source.host.length) {
+    NSURLComponents *display=[[NSURLComponents alloc] init];
+    display.scheme=source.scheme; display.host=source.host; display.port=source.port;
+    origin=display.string;
+  }
+  NSAlert *alert=[[NSAlert alloc] init];
+  alert.messageText=[NSString stringWithFormat:@"Open %@?",name];
+  alert.informativeText=[NSString stringWithFormat:@"%@ wants to open this application.",origin];
+  alert.icon=[workspace iconForFile:application.path];
+  [alert addButtonWithTitle:@"Cancel"];
+  [alert addButtonWithTitle:[NSString stringWithFormat:@"Open %@",name]];
+  _externalAppPrompt=alert; _externalAppPromptTab=tabID; _externalAppPromptGeneration=generation;
+  std::string tab=tabID;
+  __weak BrowserController *weak=self;
+  [alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse result) {
+    BrowserController *strong=weak; if (!strong) return;
+    if (strong->_externalAppPrompt!=alert) return;
+    strong->_externalAppPrompt=nil;
+    auto current=strong->_runtime.find(tab);
+    if (result!=NSAlertSecondButtonReturn || strong->_quitting || current==strong->_runtime.end() ||
+        current->second.generation!=generation || current->second.closeReason!=CloseReason::None) return;
+    // Open in the application named in the prompt, even if the default changes
+    // while it is visible. Pass the complete URL without rebuilding its query.
+    [workspace openURLs:@[url] withApplicationAtURL:application configuration:[NSWorkspaceOpenConfiguration configuration]
+      completionHandler:^(NSRunningApplication *, NSError *error) {
+        if (error) dispatch_async(dispatch_get_main_queue(), ^{
+          [weak setStatus:[NSString stringWithFormat:@"Couldn't open %@. Try opening the application and signing in again.",name]];
+        });
+      }];
+  }];
+}
+
 #pragma mark Downloads
 static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (NSString *)downloadsFile { return [_directory stringByAppendingPathComponent:@"downloads.json"]; }
@@ -761,7 +951,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   long long received=0,total=0; BOOL active=NO;
   for (NSDictionary *download in _downloads) if ([download[@"state"] isEqual:@"active"]) { active=YES; received+=[download[@"received"] longLongValue]; total+=MAX(0LL,[download[@"total"] longLongValue]); }
   _downloadsButton.progress=active ? (total>0 ? (CGFloat)received/total : 0) : -1;
-  _downloadsButton.ink=RailColor(_downloadsUnseen || active ? 0x3976be : 0x273445); _downloadsButton.needsDisplay=YES;
+  _downloadsButton.ink=_downloadsUnseen || active ? RailTint(RailRoleAccent) : RailInk(); _downloadsButton.needsDisplay=YES;
   NSUInteger running=0; for (NSDictionary *download in _downloads) if ([download[@"state"] isEqual:@"active"]) running++;
   _downloadsButton.toolTip=running ? [NSString stringWithFormat:@"Downloads · %lu in progress",(unsigned long)running] : @"Downloads";
   if (_downloadsButton.hidden==(_downloads.count>0)) { _downloadsButton.hidden=!_downloads.count; [self layout]; }
@@ -785,7 +975,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
     if (rows.count>=RailShownDownloads) break;
     NSString *path=download[@"path"], *state=download[@"state"]; BOOL done=[state isEqual:@"done"], exists=done && [NSFileManager.defaultManager fileExistsAtPath:path];
     RailDownloadRow *row=[[RailDownloadRow alloc] init]; row.title=download[@"name"]; row.detail=[self downloadDetail:download exists:exists];
-    row.icon=exists ? [NSWorkspace.sharedWorkspace iconForFile:path] : [RailSymbol([state isEqual:@"active"] ? @"arrow.down.doc" : @"doc",22) imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailColor(0x8a97a6)]]];
+    row.icon=exists ? [NSWorkspace.sharedWorkspace iconForFile:path] : [RailSymbol([state isEqual:@"active"] ? @"arrow.down.doc" : @"doc",22) imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailTint(RailRoleFaint)]]];
     long long received=[download[@"received"] longLongValue], total=[download[@"total"] longLongValue];
     row.progress=[state isEqual:@"active"] ? (total>0 ? (CGFloat)received/total : 0) : -1;
     if ([state isEqual:@"active"]) { row.accessorySymbol=@"xmark.circle.fill"; row.accessoryHelp=@"Cancel"; }
@@ -805,19 +995,19 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (!_downloads.count || _downloadsButton.hidden) return;
   __weak BrowserController *weak=self;
   if (!_downloadsPopover) {
-    RailPanel *content=[[RailPanel alloc] initWithFrame:NSMakeRect(0,0,340,200)]; content.fill=NSColor.whiteColor;
-    NSTextField *heading=RailLabel(@"Downloads",13,NSFontWeightSemibold,RailColor(0x273445)); heading.frame=NSMakeRect(16,12,200,18); [content addSubview:heading];
-    RailButton *clear=RailAction(@"Clear",nil,@"Remove finished downloads from this list",^{ [weak clearDownloads]; }); clear.font=[NSFont systemFontOfSize:11]; clear.ink=RailColor(0x245b96); clear.frame=NSMakeRect(340-62,8,50,24); clear.centered=YES; [content addSubview:clear];
+    RailPanel *content=[[RailPanel alloc] initWithFrame:NSMakeRect(0,0,340,200)]; content.fill=RailTint(RailRoleRaised);
+    NSTextField *heading=RailLabel(@"Downloads",13,NSFontWeightBold,RailInk()); heading.frame=NSMakeRect(16,12,200,18); [content addSubview:heading];
+    RailButton *clear=RailAction(@"Clear",nil,@"Remove finished downloads from this list",^{ [weak clearDownloads]; }); clear.font=RailFont(11,NSFontWeightMedium); clear.ink=RailTint(RailRoleAccent); clear.hoverFill=RailTint(RailRoleContentHover); clear.frame=NSMakeRect(340-62,8,50,24); clear.centered=YES; [content addSubview:clear];
     _downloadList=[[RailDownloadList alloc] init];
     _downloadList.onChoose=^(NSInteger index, BOOL accessory) { [weak chooseDownload:index accessory:accessory]; };
     _downloadList.menuForRow=^NSMenu *(NSInteger index) { return [weak menuForDownload:index]; };
     [content addSubview:_downloadList];
     RailButton *folder=RailAction(@"Open Downloads Folder",@"folder",@"Show the Downloads folder in Finder",^{ BrowserController *strong=weak; if (strong) [strong->_downloadsPopover close]; [NSWorkspace.sharedWorkspace openURL:[NSFileManager.defaultManager URLsForDirectory:NSDownloadsDirectory inDomains:NSUserDomainMask].firstObject]; });
-    folder.tag=910; folder.font=[NSFont systemFontOfSize:12]; folder.ink=RailColor(0x596879); [content addSubview:folder];
+    folder.tag=910; folder.font=RailFont(12,NSFontWeightRegular); folder.ink=RailMuted(); folder.hoverFill=RailTint(RailRoleContentHover); [content addSubview:folder];
     NSViewController *controller=[[NSViewController alloc] init]; controller.view=content;
     _downloadsPopover=[[NSPopover alloc] init]; _downloadsPopover.behavior=NSPopoverBehaviorTransient; _downloadsPopover.contentViewController=controller;
-    _downloadsPopover.appearance=[NSAppearance appearanceNamed:NSAppearanceNameAqua];
   }
+  _downloadsPopover.appearance=RailThemeAppearance();
   _downloadsUnseen=NO; [self fillDownloadsPopover]; [self updateDownloads];
   [_downloadsPopover showRelativeToRect:_downloadsButton.bounds ofView:_downloadsButton preferredEdge:NSRectEdgeMaxY];
 }
@@ -886,6 +1076,19 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   _dropIndicator.frame=pin ? NSMakeRect(5,0,side-10,_pinnedSectionEnd-6) : NSMakeRect(5,_pinnedSectionEnd-2,side-10,MAX(40,height-_pinnedSectionEnd-2));
   _dropIndicator.hidden=NO; return NSDragOperationMove;
 }
+// Dropping a tab on a Space icon in the rail moves it to that Space.
+- (NSDragOperation)railDragOver:(NSString *)tabID at:(NSPoint)point drop:(BOOL)drop {
+  const auto *tab=_model.tab(C(tabID)); NSView *target=nil;
+  for (NSView *v in _rail.subviews) if (v.tag>=1000 && NSPointInRect(point,NSInsetRect(v.frame,-4,-4))) target=v;
+  size_t index=target ? (size_t)(target.tag-1000) : _model.state.spaces.size();
+  if (!tab || index>=_model.state.spaces.size() || _model.state.spaces[index].id==tab->spaceID) { _railDropIndicator.hidden=YES; return NSDragOperationNone; }
+  if (drop) {
+    std::string id=tab->id, space=_model.state.spaces[index].id; __weak BrowserController *weak=self;
+    dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (!strong || !strong->_model.moveTab(id,space,Now())) return; [strong ensureBrowser:strong->_model.state.activeTabID]; [strong refresh]; [strong saveSoon]; });
+    _railDropIndicator.hidden=YES; return NSDragOperationMove;
+  }
+  _railDropIndicator.frame=NSInsetRect(target.frame,-3,-3); _railDropIndicator.hidden=NO; return NSDragOperationMove;
+}
 - (void)resizeSidebarTo:(CGFloat)delta { _model.state.sidebarWidth=std::clamp<double>(_dragStartWidth+delta/rail::BrowserModel::controlScale(_model.state.controlSize),180,420); [self refresh]; }
 - (void)newTab:(id)sender { (void)sender; if (_quitting) return; _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now()); [self refresh]; [self saveSoon]; [self focusAddress:nil]; }
 - (void)closeCurrentTab:(id)sender {
@@ -953,7 +1156,22 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   [self closeRuntime:id reason:CloseReason::Idle session:""];
 }
 - (void)moveTabMenu:(NSMenuItem *)sender { _model.moveTab(C(sender.representedObject[@"tab"]),C(sender.representedObject[@"space"]),Now()); [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon]; }
-- (void)toggleSidebar:(id)sender { (void)sender; _model.state.sidebarVisible=!_model.state.sidebarVisible; [self layout]; [self saveSoon]; }
+- (void)toggleSidebar:(id)sender {
+  (void)sender; _model.state.sidebarVisible=!_model.state.sidebarVisible; [self saveSoon];
+  [_sidebarTimer invalidate]; _sidebarTimer=nil;
+  CGFloat target=_model.state.sidebarVisible ? 1 : 0; const std::string &style=_model.state.sidebarAnimation;
+  if (style=="off" || NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion || !_window.isVisible) { _sidebarReveal=target; [self layout]; return; }
+  // Full slides the navigation out; Subtle is a shorter slide that also fades.
+  // Either eases out from wherever a previous toggle left off, so quick presses reverse smoothly.
+  CGFloat from=_sidebarReveal, duration=(style=="subtle" ? .14 : .22)*fabs(target-from); NSTimeInterval begin=NSProcessInfo.processInfo.systemUptime; __weak BrowserController *weak=self;
+  _sidebarTimer=[NSTimer timerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *timer) {
+    BrowserController *strong=weak; if (!strong) { [timer invalidate]; return; }
+    CGFloat t=duration>0 ? MIN(1,(NSProcessInfo.processInfo.systemUptime-begin)/duration) : 1, eased=1-pow(1-t,3);
+    strong->_sidebarReveal=from+(target-from)*eased; [strong layout];
+    if (t>=1) { [timer invalidate]; strong->_sidebarTimer=nil; }
+  }];
+  [NSRunLoop.currentRunLoop addTimer:_sidebarTimer forMode:NSRunLoopCommonModes];
+}
 - (void)focusAddress:(id)sender { (void)sender; [_window makeFirstResponder:_address]; [_address selectText:nil]; }
 - (void)addressFocusChanged:(BOOL)focused {
   _editingAddress=focused;
@@ -965,6 +1183,10 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   } else { [self hideSuggestions]; [self refresh]; }
 }
 - (void)controlTextDidChange:(NSNotification *)notification {
+  if (notification.object==_findField) {
+    auto it=_runtime.find(_model.state.activeTabID); if (it==_runtime.end() || !it->second.findVisible) return;
+    it->second.findText=C(_findField.stringValue); [self searchPageForward:YES next:NO]; return;
+  }
   if (notification.object!=_address) return;
   NSTextView *editor=(NSTextView *)_address.currentEditor; NSString *typed=editor.string;
   // Never complete over a deletion, otherwise backspace could not remove the suggested text.
@@ -1021,9 +1243,16 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   _suggestionList.selectedIndex=index;
   NSTextView *editor=(NSTextView *)_address.currentEditor; editor.string=_addressRows[index].text; editor.selectedRange=NSMakeRange(editor.string.length,0);
 }
-- (void)controlTextDidBeginEditing:(NSNotification *)notification { (void)notification; _editingAddress=YES; }
+- (void)controlTextDidBeginEditing:(NSNotification *)notification { if (notification.object==_address) _editingAddress=YES; }
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
   (void)textView;
+  if (control==_findField) {
+    if (command==@selector(cancelOperation:)) { [self closeFind:nil]; return YES; }
+    if (command==@selector(insertNewline:) || command==@selector(insertNewlineIgnoringFieldEditor:)) {
+      [self searchPageForward:!(NSApp.currentEvent.modifierFlags & NSEventModifierFlagShift) next:YES]; return YES;
+    }
+    return NO;
+  }
   if (control!=_address) return NO;
   BOOL listed=!_suggestionList.hidden && !_addressRows.empty();
   if ([NSStringFromSelector(command) hasPrefix:@"delete"]) { _deletingAddress=YES; return NO; }
@@ -1067,46 +1296,256 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)reloadPage:(id)sender { (void)sender; if (_readingVisible) { [_reading reloadSelected]; return; } if (auto browser=[self activeBrowser]) { auto &slot=_runtime.at(_model.state.activeTabID); slot.error.clear(); browser->Reload(); [self refresh]; } else [self ensureBrowser:_model.state.activeTabID]; }
 - (void)showDevTools:(id)sender {
   (void)sender; if (_quitting) return;
-  // A focused inspector may belong to a tab other than the selected one.
-  if (NSApp.keyWindow && NSApp.keyWindow!=_window) { [NSApp.keyWindow performClose:nil]; return; }
-  if (_homeVisible || _readingVisible) return;
-  if (auto browser=[self activeBrowser]) {
-    if (browser->GetHost()->HasDevTools()) browser->GetHost()->CloseDevTools();
-    else ShowRailDevTools(browser);
+  // Close the inspector through CEF: a docked inspector has a borderless child window.
+  if (NSWindow *key=NSApp.keyWindow; key && key!=_window) {
+    for (auto &[id,slot] : _runtime) {
+      (void)id;
+      if (slot.devTools && ((__bridge NSView *)slot.devTools->GetHost()->GetWindowHandle()).window==key) {
+        slot.browser->GetHost()->CloseDevTools(); return;
+      }
+    }
+    return;
   }
+  if (!_homeVisible && !_readingVisible) [self openDevToolsForTab:_model.state.activeTabID at:CefPoint() toggle:YES];
+}
+- (void)inspectTab:(const std::string &)tabID generation:(uint64_t)generation at:(CefPoint)point {
+  auto it=_runtime.find(tabID); if (it!=_runtime.end() && it->second.generation==generation) [self openDevToolsForTab:tabID at:point toggle:NO];
+}
+// The page's width, and the docked inspector's, which always leaves the page some room.
+- (CGFloat)dockedDevToolsWidth:(const RuntimeTab &)slot {
+  if (!slot.devToolsOpen || !slot.devToolsDocked) return 0;
+  CGFloat w=slot.container.bounds.size.width; return round(MAX(0,MIN(_model.state.devToolsWidth,w-200)));
+}
+- (void)layoutRuntime:(RuntimeTab &)slot {
+  slot.container.frame=_webHost.bounds;
+  CGFloat w=slot.container.bounds.size.width, h=slot.container.bounds.size.height, tools=[self dockedDevToolsWidth:slot];
+  NSView *page=slot.browser ? (__bridge NSView *)slot.browser->GetHost()->GetWindowHandle() : nil;
+  for (NSView *child in slot.container.subviews) if (child!=slot.devToolsDivider) child.frame=NSMakeRect(0,0,w-tools,h);
+  (void)page; slot.devToolsDivider.hidden=!tools; slot.devToolsDivider.frame=NSMakeRect(w-tools-6,0,6,h);
+  [self placeDevTools:slot];
+}
+// Keeps a docked DevTools window over its page's right side, shown only while that page is.
+- (void)placeDevTools:(RuntimeTab &)slot {
+  NSWindow *tools=slot.devToolsWindow; if (!tools) return;
+  CGFloat width=[self dockedDevToolsWidth:slot];
+  BOOL shown=width>0 && !slot.container.hidden && slot.container.superview && _window.isVisible && !_window.miniaturized;
+  if (!shown) { if (tools.parentWindow) [_window removeChildWindow:tools]; [tools orderOut:nil]; return; }
+  NSRect bounds=slot.container.bounds, area=NSMakeRect(NSMaxX(bounds)-width,0,width,bounds.size.height);
+  [tools setFrame:[_window convertRectToScreen:[slot.container convertRect:area toView:nil]] display:YES];
+  if (tools.parentWindow!=_window) [_window addChildWindow:tools ordered:NSWindowAbove];
+}
+- (void)openDevToolsForTab:(const std::string &)tabID at:(CefPoint)point toggle:(BOOL)toggle {
+  auto it=_runtime.find(tabID); if (it==_runtime.end() || !it->second.browser || it->second.closeReason!=CloseReason::None || _quitting) return;
+  auto &slot=it->second;
+  if (slot.devToolsOpen) {
+    // The shortcut and menu toggle DevTools closed in either layout.
+    if (toggle) { slot.browser->GetHost()->CloseDevTools(); return; }
+  } else { slot.devToolsOpen=true; slot.devToolsDocked=_model.state.devToolsDocked; }
+  if (slot.devToolsDocked) {
+    if (!slot.devToolsDivider) {
+      __weak BrowserController *weak=self; std::string id=tabID; RailResizeHandle *divider=[[RailResizeHandle alloc] init];
+      // The divider is wider than the hairline it shows, so it is easy to grab.
+      RailPanel *line=[[RailPanel alloc] initWithFrame:NSMakeRect(5,0,1,0)]; line.fill=RailLine(); line.autoresizingMask=NSViewHeightSizable; [divider addSubview:line];
+      divider.onBegin=^{ BrowserController *strong=weak; if (strong) strong->_devToolsStartWidth=strong->_model.state.devToolsWidth; };
+      divider.onDrag=^(CGFloat delta) { BrowserController *strong=weak; if (!strong) return; auto found=strong->_runtime.find(id); if (found==strong->_runtime.end()) return;
+        strong->_model.state.devToolsWidth=std::clamp<double>(strong->_devToolsStartWidth-delta,240,MAX(240,found->second.container.bounds.size.width-200)); [strong layout]; };
+      divider.onEnd=^{ [weak saveSoon]; };
+      slot.devToolsDivider=divider;
+    }
+    if (slot.devToolsDivider.superview!=slot.container) [slot.container addSubview:slot.devToolsDivider positioned:NSWindowAbove relativeTo:nil];
+    [self layoutRuntime:slot];
+  }
+  ShowRailDevTools(self,slot.browser,tabID,slot.generation,slot.devToolsDocked,point);
+}
+- (void)devToolsCreated:(CefRefPtr<CefBrowser>)devTools tab:(const std::string &)tabID generation:(uint64_t)generation {
+  auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
+  auto &slot=it->second; slot.devTools=devTools;
+  if (!slot.devToolsDocked) return;
+  NSWindow *tools=((__bridge NSView *)devTools->GetHost()->GetWindowHandle()).window; if (!tools) return;
+  // No title bar or shadow, so it reads as part of the page area rather than a floating window.
+  tools.styleMask=NSWindowStyleMaskBorderless|NSWindowStyleMaskResizable; tools.hasShadow=NO; tools.movable=NO;
+  slot.devToolsWindow=tools; [self layoutRuntime:slot];
+}
+- (void)devToolsClosed:(CefRefPtr<CefBrowser>)devTools tab:(const std::string &)tabID generation:(uint64_t)generation {
+  auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
+  auto &slot=it->second; if (slot.devTools && !slot.devTools->IsSame(devTools)) return;
+  if (slot.devToolsWindow.parentWindow) [_window removeChildWindow:slot.devToolsWindow];
+  [slot.devToolsDivider removeFromSuperview];
+  slot.devTools=nullptr; slot.devToolsWindow=nil; slot.devToolsOpen=false; [self layoutRuntime:slot];
+  if (slot.reopenDevTools) { slot.reopenDevTools=false; [self openDevToolsForTab:tabID at:CefPoint() toggle:NO]; }
+  else if (tabID==_model.state.activeTabID && slot.browser && _window.isKeyWindow) slot.browser->GetHost()->SetFocus(true);
+}
+// Docked DevTools keep the browser's shortcuts, except those the inspector uses itself.
+- (BOOL)handleDevToolsShortcut:(NSEvent *)event {
+  NSEventModifierFlags flags=event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  // Modifier changes arrive here too; they have no characters.
+  NSString *key=event.type==NSEventTypeKeyDown ? event.charactersIgnoringModifiers.lowercaseString : @"";
+  // ⌘W closes the inspector, as it does in its own window.
+  if ((flags & NSEventModifierFlagCommand) && ([key isEqual:@"f"] || [key isEqual:@"g"] || [key isEqual:@"["] || [key isEqual:@"]"] || [key isEqual:@"z"] || [key isEqual:@"w"])) return NO;
+  _forwardingDevToolsShortcut=YES; BOOL handled=[self handleShortcut:event]; _forwardingDevToolsShortcut=NO; return handled;
+}
+// For automation: "docked", "window" or "" for the current tab's DevTools.
+- (NSString *)activeDevToolsMode {
+  auto it=_runtime.find(_model.state.activeTabID); if (it==_runtime.end() || !it->second.devTools) return @"";
+  return it->second.devToolsDocked ? (it->second.devToolsWindow.parentWindow ? @"docked" : @"") : @"window";
+}
+- (void)toggleDevToolsDock:(id)sender {
+  (void)sender; _model.state.devToolsDocked=!_model.state.devToolsDocked; [self saveSoon];
+  // Open DevTools on the current page move over: Chromium can't re-parent them, so they close and reopen.
+  auto it=_runtime.find(_model.state.activeTabID);
+  if (it!=_runtime.end() && it->second.devToolsOpen && it->second.devToolsDocked!=_model.state.devToolsDocked && it->second.browser) { it->second.reopenDevTools=true; it->second.browser->GetHost()->CloseDevTools(); }
 }
 - (void)zoomIn:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()+.5); }
 - (void)zoomOut:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()-.5); }
 - (void)zoomReset:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(0); }
 - (void)findInPage:(id)sender {
-  (void)sender; if (_readingVisible) { [_reading.reader showFind]; return; }
-  auto browser=[self activeBrowser]; if (!browser) return;
-  [self askForText:@"Find in page" initial:@"" completion:^(NSString *value) { if (value.length) browser->GetHost()->Find(C(value),true,false,false); }];
+    (void)sender; if (_readingVisible) { [_reading.reader showFind]; return; }  if (_homeVisible || ![self activeBrowser]) return;
+  auto &slot=_runtime.at(_model.state.activeTabID); BOOL opening=!slot.findVisible;
+  slot.findVisible=true; [self hideSuggestions]; [self refreshFindBar]; [self layout];
+  [_window makeFirstResponder:_findField]; [_findField selectText:nil];
+  if (opening && !slot.findText.empty()) [self searchPageForward:YES next:NO];
+}
+- (void)refreshFindBar {
+  auto it=_runtime.find(_model.state.activeTabID);
+  BOOL visible=!_homeVisible && !_readingVisible && it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None && it->second.findVisible;
+  if (!visible && _findField.currentEditor) [_window makeFirstResponder:nil];
+  _findBar.hidden=!visible; if (!visible) return;
+  const auto &slot=it->second;
+  NSString *text=S(slot.findText); if (![_findField.stringValue isEqualToString:text]) _findField.stringValue=text;
+  _findCount.stringValue=slot.findText.empty() ? @"" : slot.findPending ? @"…" : [NSString stringWithFormat:@"%d/%d",slot.findOrdinal,slot.findCount];
+  _findCount.textColor=!slot.findText.empty() && !slot.findPending && !slot.findCount ? RailTint(RailRoleCriticalInk) : RailMuted();
+  _findNext.enabled=_findPrevious.enabled=slot.findCount>0;
+}
+- (void)searchPageForward:(BOOL)forward next:(BOOL)next {
+  auto browser=[self activeBrowser]; if (_homeVisible || _readingVisible || !browser) return;
+  auto &slot=_runtime.at(_model.state.activeTabID);
+  if (!next) slot.findCount=slot.findOrdinal=0;
+  slot.findPending=!slot.findText.empty();
+  if (slot.findText.empty()) browser->GetHost()->StopFinding(true);
+  // This CEF version forwards findNext as Chromium's find_match option. True
+  // selects and scrolls to a match; Chromium starts a new session when text changes.
+  else browser->GetHost()->Find(slot.findText,forward,false,true);
+  [self refreshFindBar];
+}
+- (void)findNext:(id)sender { (void)sender; [self searchPageForward:YES next:YES]; }
+- (void)findPrevious:(id)sender { (void)sender; [self searchPageForward:NO next:YES]; }
+- (void)closeFind:(id)sender {
+  (void)sender; auto it=_runtime.find(_model.state.activeTabID); if (it==_runtime.end()) return;
+  auto &slot=it->second; slot.findVisible=false; slot.findPending=false;
+  if (slot.browser) slot.browser->GetHost()->StopFinding(true);
+  [self refreshFindBar]; if (auto browser=[self activeBrowser]) browser->GetHost()->SetFocus(true);
+}
+- (void)findResult:(int)identifier count:(int)count ordinal:(int)ordinal final:(BOOL)finalUpdate tab:(const std::string &)tabID generation:(uint64_t)generation {
+  auto it=_runtime.find(tabID); if (it==_runtime.end() || it->second.generation!=generation) return;
+  auto &slot=it->second; if (slot.findText.empty() || !slot.findPending || identifier<slot.findIdentifier) return;
+  slot.findIdentifier=identifier;
+  if (count>=0) slot.findCount=count;
+  if (ordinal>=0) slot.findOrdinal=ordinal;
+  if (!slot.findCount) slot.findOrdinal=0;
+  if (finalUpdate) slot.findPending=false;
+  if (tabID==_model.state.activeTabID) [self refreshFindBar];
+}
+- (void)openPasswordPalette {
+  if (!_passwordService) {
+    _passwordService=[[PasswordService alloc] init];
+    if (_automation) for (NSString *arg in NSProcessInfo.processInfo.arguments) if ([arg hasPrefix:@"--password-fixture-origin="]) _passwordFixtureOrigin=[arg substringFromIndex:26];
+    _passwordService.fixtureOrigin=_passwordFixtureOrigin;
+  }
+  __weak BrowserController *weak=self;
+  _passwordPalette=[[PasswordPalette alloc] initWithService:_passwordService parent:_window url:_passwordURL title:@"Login" fill:^(NSString *username, NSString *password, BOOL creating, void (^done)(NSString *)) {
+    BrowserController *s=weak;
+    if (!s || s->_homeVisible || s->_model.state.activeTabID!=s->_passwordTab || !s->_passwordToken.length) { done(@"stale_page"); return; }
+    auto it=s->_runtime.find(s->_passwordTab);
+    if (it==s->_runtime.end() || it->second.generation!=s->_passwordGeneration || !it->second.browser || ![S(it->second.browser->GetMainFrame()->GetURL().ToString()) isEqual:s->_passwordURL]) { done(@"stale_page"); return; }
+    auto message=CefProcessMessage::Create("rail.credentials.request"); auto a=message->GetArgumentList();
+    NSString *requestID=NSUUID.UUID.UUIDString; s->_passwordRequestID=requestID; s->_passwordFillCompletion=[done copy];
+    s->_passwordFillingNew=creating;
+    a->SetString(0,C(requestID)); a->SetString(1,"fill"); a->SetString(2,C(s->_passwordURL)); a->SetString(3,C(s->_passwordToken));
+    a->SetString(4,C(username)); a->SetString(5,C(password)); a->SetBool(6,creating);
+    it->second.browser->GetMainFrame()->SendProcessMessage(PID_RENDERER,message);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+      BrowserController *owner=weak;
+      if (owner && [owner->_passwordRequestID isEqual:requestID] && owner->_passwordFillCompletion) {
+        auto completion=owner->_passwordFillCompletion; owner->_passwordFillCompletion=nil; owner->_passwordRequestID=nil; completion(@"no_fields");
+      }
+    });
+  }];
+  [_passwordPalette show];
+}
+- (void)showPasswords:(id)sender {
+  (void)sender;
+  if (_passwordPalette.panel.isVisible) { [_passwordPalette.panel makeKeyAndOrderFront:nil]; return; }
+  // A previous fill's success must not remain under a new or uncertain save.
+  [self setStatus:@""];
+  _passwordURL=@""; _passwordToken=nil; _passwordRequestID=nil; _passwordFillCompletion=nil;
+  auto browser=[self activeBrowser];
+  if (_homeVisible || !browser) { [self openPasswordPalette]; return; }
+  _passwordTab=_model.state.activeTabID; _passwordGeneration=_runtime.at(_passwordTab).generation;
+  _passwordURL=S(browser->GetMainFrame()->GetURL().ToString());
+  NSString *requestID=NSUUID.UUID.UUIDString; _passwordRequestID=requestID;
+  auto message=CefProcessMessage::Create("rail.credentials.request"); auto a=message->GetArgumentList();
+  a->SetSize(7); a->SetString(0,C(requestID)); a->SetString(1,"context"); a->SetString(2,C(_passwordURL));
+  browser->GetMainFrame()->SendProcessMessage(PID_RENDERER,message);
+  __weak BrowserController *weak=self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+    BrowserController *s=weak;
+    if (s && [s->_passwordRequestID isEqual:requestID] && !s->_passwordToken.length) { s->_passwordRequestID=nil; [s setStatus:@"1Password couldn’t reach this page. Reload and try again."]; }
+  });
+}
+- (void)passwordPageNavigating:(const std::string &)tab generation:(uint64_t)generation {
+  if (tab!=_passwordTab || generation!=_passwordGeneration) return;
+  _passwordToken=nil; _passwordRequestID=nil; [_passwordPalette invalidatePage];
+  auto completion=_passwordFillCompletion; _passwordFillCompletion=nil; if (completion) completion(@"stale_page");
+}
+- (void)passwordReply:(CefRefPtr<CefProcessMessage>)message tab:(const std::string &)tab generation:(uint64_t)generation {
+  auto a=message->GetArgumentList();
+  if (a->GetSize()!=5 || tab!=_passwordTab || generation!=_passwordGeneration || ![S(a->GetString(0).ToString()) isEqual:_passwordRequestID]) return;
+  NSString *status=S(a->GetString(4).ToString());
+  if (_homeVisible || _model.state.activeTabID!=tab || ![S(a->GetString(2).ToString()) isEqual:_passwordURL]) status=@"stale_page";
+  _passwordRequestID=nil;
+  if (a->GetString(1)=="context") {
+    if (![status isEqual:@"ready"]) { [self setStatus:@"The page changed. Open 1Password again."]; return; }
+    _passwordToken=S(a->GetString(3).ToString()); [self openPasswordPalette];
+  } else {
+    auto completion=_passwordFillCompletion; _passwordFillCompletion=nil; if (completion) completion(status);
+    if ([status isEqual:@"filled"] || [status isEqual:@"username_filled"]) {
+      [self setStatus:_passwordFillingNew ? @"Saved to 1Password and filled. Complete signup on the website." : @"Login filled. Continue on the website."];
+      if (auto browser=[self activeBrowser]) browser->GetHost()->SetFocus(true);
+    }
+  }
 }
 - (BOOL)handleShortcut:(NSEvent *)event {
+  if ([_passwordPalette handleShortcut:event]) return YES;
   NSEventModifierFlags flags=event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
   // Releasing Ctrl commits the tab chosen in the switcher.
   if (event.type==NSEventTypeFlagsChanged) { if (!_switcherTabs.empty() && !(flags & NSEventModifierFlagControl)) [self finishTabSwitch:YES]; return NO; }
   if (event.type!=NSEventTypeKeyDown || _window.attachedSheet) return NO;
   // Toggle a focused inspector without routing its other shortcuts to the page.
-  if (event.window && event.window!=_window) {
-    if ((flags & NSEventModifierFlagCommand) && (flags & NSEventModifierFlagOption) && !(flags & NSEventModifierFlagShift) && [event.charactersIgnoringModifiers.lowercaseString isEqual:@"i"]) { [event.window performClose:nil]; return YES; }
+  if (event.window && event.window!=_window && !_forwardingDevToolsShortcut) {
+    if ((flags & NSEventModifierFlagCommand) && (flags & NSEventModifierFlagOption) && !(flags & NSEventModifierFlagShift) && [event.charactersIgnoringModifiers.lowercaseString isEqual:@"i"]) { [self showDevTools:nil]; return YES; }
     return NO;
   }
   if (event.keyCode==48 && (flags & NSEventModifierFlagControl) && !(flags & NSEventModifierFlagCommand)) { [self cycleRecentTabs:(flags & NSEventModifierFlagShift) ? -1 : 1]; return YES; }
   if (!_switcherTabs.empty() && event.keyCode==53) { [self finishTabSwitch:NO]; return YES; }
+  if (!_findBar.hidden && event.keyCode==53) { [self closeFind:nil]; return YES; }
+  if (!_findBar.hidden && _findField.currentEditor && (event.keyCode==36 || event.keyCode==76) && !(flags & (NSEventModifierFlagCommand|NSEventModifierFlagControl|NSEventModifierFlagOption))) {
+    [self searchPageForward:!(flags & NSEventModifierFlagShift) next:YES]; return YES;
+  }
   if (!(flags & NSEventModifierFlagCommand)) { _undoCloseArmed=NO; return NO; }
   NSString *key=event.charactersIgnoringModifiers.lowercaseString;
   BOOL shift=(flags & NSEventModifierFlagShift)!=0;
   if ([key isEqual:@"l"] && shift) { [self showReading:nil]; return YES; }
-  if ([key isEqual:@"d"] && shift) { [self savePageToReading:nil]; return YES; }
+  if ([key isEqual:@"d"] && shift && !(flags & NSEventModifierFlagOption)) { [self savePageToReading:nil]; return YES; }
   if ([key isEqual:@"v"] && !shift && _readingVisible && [self pasteIntoReading]) return YES;
   if ([key isEqual:@"i"] && (flags & NSEventModifierFlagOption) && !shift) [self showDevTools:nil];
+  else if ([key isEqual:@"p"] && shift) [self showPasswords:nil];
+  else if ([key isEqual:@"d"] && shift && (flags & NSEventModifierFlagOption)) [self toggleDevToolsDock:nil];
   else if ([key isEqual:@"t"] && shift) [self reopenClosedTab:nil];
   else if ([key isEqual:@"z"] && !shift && _undoCloseArmed && !_model.closedTabs.empty()) [self reopenClosedTab:nil];
   else if ([key isEqual:@"s"]) [self toggleSidebar:nil]; else if ([key isEqual:@"l"]) [self focusAddress:nil];
   else if ([key isEqual:@"t"]) [self newTab:nil]; else if ([key isEqual:@"w"]) [self closeCurrentTab:nil];
   else if ([key isEqual:@"r"]) [self reloadPage:nil]; else if ([key isEqual:@"f"]) [self findInPage:nil];
+  else if ([key isEqual:@"g"] && !(flags & (NSEventModifierFlagOption|NSEventModifierFlagControl))) [self searchPageForward:!shift next:YES];
   else if ([key isEqual:@"["]) [self goBack:nil]; else if ([key isEqual:@"]"]) [self goForward:nil];
   else if ([key isEqual:@"q"]) [self quit:nil];
   else if (key.integerValue>=1 && key.integerValue<=9) {
@@ -1136,8 +1575,8 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   NSMenuItem *icon=[[NSMenuItem alloc] initWithTitle:@"Icon" action:nil keyEquivalent:@""]; icon.submenu=[[NSMenu alloc] init];
   NSString *current=nil; for (size_t i=0;i<_model.state.spaces.size();i++) if (_model.state.spaces[i].id==_model.state.activeSpaceID) current=[self symbolForSpace:_model.state.spaces[i] index:i];
   BOOL known=NO;
-  for (NSString *symbol in SpaceSymbols()) {
-    NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:SymbolTitle(symbol) action:@selector(spaceIcon:) keyEquivalent:@""]; item.target=self; item.representedObject=symbol; item.image=RailSymbol(symbol,13);
+  for (NSString *symbol in RailSpaceSymbols()) {
+    NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:RailSymbolTitle(symbol) action:@selector(spaceIcon:) keyEquivalent:@""]; item.target=self; item.representedObject=symbol; item.image=RailSymbol(symbol,13);
     if ([symbol isEqualToString:current]) { item.state=NSControlStateValueOn; known=YES; }
     [icon.submenu addItem:item];
   }
@@ -1148,22 +1587,11 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,28) inView:_spaceOptions];
 }
 - (void)renameSpace:(id)sender { (void)sender; auto *space=_model.space(_model.state.activeSpaceID); if (!space) return; std::string id=space->id; __weak BrowserController *weak=self; [self askForText:@"Rename Space" initial:S(space->name) completion:^(NSString *name) { BrowserController *strong=weak; if (strong && name.length) if (auto *s=strong->_model.space(id)) { s->name=C(name); [strong refresh]; [strong saveSoon]; } }]; }
+// Link rules are edited with the rest of the Space in Settings.
 - (void)editSpaceRules:(id)sender {
-  (void)sender; const auto *space=_model.space(_model.state.activeSpaceID); if (!space) return; std::string id=space->id;
-  NSMutableArray *lines=[NSMutableArray array]; for (const auto &pattern:_model.rulesForSpace(id)) [lines addObject:S(pattern)];
-  NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=[NSString stringWithFormat:@"Open links in %@",S(space->name)];
-  alert.informativeText=@"One address pattern per line, for example dev.azure.com/contoso/**. * matches within a path segment, ** matches anything below. Links from other apps, links that open a new tab, and addresses typed into a new tab open here. The most specific pattern wins.";
-  NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(0,0,320,120)]; scroll.hasVerticalScroller=YES; scroll.borderType=NSBezelBorder;
-  NSTextView *field=[[NSTextView alloc] initWithFrame:scroll.contentView.bounds]; field.string=[lines componentsJoinedByString:@"\n"];
-  field.font=[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]; field.richText=NO; field.automaticQuoteSubstitutionEnabled=NO; field.automaticDashSubstitutionEnabled=NO; field.automaticTextReplacementEnabled=NO; field.automaticSpellingCorrectionEnabled=NO;
-  field.autoresizingMask=NSViewWidthSizable; field.textContainerInset=NSMakeSize(2,4); field.accessibilityLabel=@"Address patterns"; scroll.documentView=field; alert.accessoryView=scroll;
-  [alert addButtonWithTitle:@"Save"]; [alert addButtonWithTitle:@"Cancel"]; __weak BrowserController *weak=self;
-  [alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse result) {
-    BrowserController *strong=weak; if (!strong || result!=NSAlertFirstButtonReturn) return;
-    std::vector<std::string> patterns; for (NSString *line in [field.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) patterns.push_back(C(line));
-    if (strong->_model.setSpaceRules(id,patterns)) [strong saveSoon];
-  }];
-  [alert.window makeFirstResponder:field];
+  (void)sender; if (!_model.space(_model.state.activeSpaceID)) return;
+  if (!_settingsWindow) _settingsWindow=[[SettingsWindowController alloc] initWithHost:self];
+  [_settingsWindow showSpace:S(_model.state.activeSpaceID)];
 }
 - (NSString *)symbolForSpace:(const rail::Space &)space index:(size_t)index {
   if (!space.icon.empty() && [NSImage imageWithSystemSymbolName:S(space.icon) accessibilityDescription:nil]) return S(space.icon);
@@ -1217,31 +1645,39 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
     [self refresh]; [self saveSoon];
   }
 }
-- (void)showSettings:(id)sender {
-  (void)sender;
-  if (_settings.shown) { [_settings close]; return; }
-  NSViewController *content=[[NSViewController alloc] init]; RailPanel *panel=[[RailPanel alloc] initWithFrame:NSMakeRect(0,0,310,324)]; panel.fill=RailColor(0xedf1f5); content.view=panel;
-  NSTextField *sizeTitle=RailLabel(@"Sidebar and Space home size",15,NSFontWeightSemibold,RailColor(0x273445)); sizeTitle.frame=NSMakeRect(18,18,274,24); [panel addSubview:sizeTitle];
-  NSSegmentedControl *size=[NSSegmentedControl segmentedControlWithLabels:@[@"Small",@"Normal",@"Large"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(controlSizeChosen:)];
-  size.selectedSegment=_model.state.controlSize=="large" ? 2 : _model.state.controlSize=="normal" ? 1 : 0; size.frame=NSMakeRect(18,50,274,26); size.segmentDistribution=NSSegmentDistributionFillEqually; [panel addSubview:size];
-  NSTextField *title=RailLabel(@"Give idle tabs a rest",15,NSFontWeightSemibold,RailColor(0x273445)); title.frame=NSMakeRect(18,102,274,24); [panel addSubview:title];
-  NSTextField *label=RailLabel(@"Unload after",12,NSFontWeightRegular,RailColor(0x273445)); label.frame=NSMakeRect(18,150,135,22); [panel addSubview:label];
-  NSPopUpButton *timeout=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(164,145,126,28) pullsDown:NO];
-  for (NSNumber *minutes in @[@1,@5,@10,@15,@30,@60]) { [timeout addItemWithTitle:[NSString stringWithFormat:@"%@ minutes",minutes]]; timeout.lastItem.representedObject=minutes; if (minutes.doubleValue==_model.state.idleMinutes) [timeout selectItem:timeout.lastItem]; }
-  timeout.target=self; timeout.action=@selector(timeoutChosen:); [panel addSubview:timeout];
-  NSTextField *copy=RailLabel(@"Inactive pages close, including pinned tabs. Their titles and addresses stay; opening a tab reloads its page. The selected tab stays awake.",11,NSFontWeightRegular,RailColor(0x596879)); copy.frame=NSMakeRect(18,189,274,70); copy.maximumNumberOfLines=4; copy.lineBreakMode=NSLineBreakByWordWrapping; [panel addSubview:copy];
-  NSTextField *note=RailLabel(@"Unsaved page state may be lost. Isolated sessions keep their own saved logins.",11,NSFontWeightRegular,RailColor(0x596879)); note.frame=NSMakeRect(18,268,274,42); note.maximumNumberOfLines=3; note.lineBreakMode=NSLineBreakByWordWrapping; [panel addSubview:note];
-  _settings=[[NSPopover alloc] init]; _settings.contentViewController=content; _settings.behavior=NSPopoverBehaviorTransient;
-  [_settings showRelativeToRect:_sessionPicker.bounds ofView:_sessionPicker preferredEdge:NSRectEdgeMinY];
+- (void)showSettings:(id)sender { (void)sender; [self showSettingsPane:nil]; }
+- (void)showSettingsPane:(NSString *)pane {
+  if (!_settingsWindow) _settingsWindow=[[SettingsWindowController alloc] initWithHost:self];
+  [_settingsWindow showPane:pane];
 }
-- (void)controlSizeChosen:(NSSegmentedControl *)sender {
-  NSArray *sizes=@[@"small",@"normal",@"large"]; if (sender.selectedSegment<0 || sender.selectedSegment>=(NSInteger)sizes.count) return;
-  _model.state.controlSize=C(sizes[sender.selectedSegment]); [self refresh]; [self saveSoon];
+#pragma mark Theme
+// Dynamic colours redraw by themselves; views that copied a colour into a layer or built their
+// rows from the old theme are rebuilt. Pages, scroll positions, focus and sessions are untouched.
+- (void)themeDidChange:(NSNotification *)note {
+  (void)note; if (!_window) return;
+  _window.appearance=RailThemeAppearance(); _window.backgroundColor=RailTint(RailRoleShell);
+  _railDropIndicator.layer.borderColor=RailTint(RailRoleFocus).CGColor; _dropIndicator.layer.borderColor=RailTint(RailRoleFocus).CGColor;
+  _findBar.layer.borderColor=RailLine().CGColor;
+  if (_downloadsPopover) { _downloadsPopover.appearance=RailThemeAppearance(); if (_downloadsPopover.shown) [self fillDownloadsPopover]; }
+  [self updateDownloads]; [self refresh]; RailRedrawAllWindows();
 }
-- (void)timeoutChosen:(NSPopUpButton *)sender { _model.state.idleMinutes=[sender.selectedItem.representedObject doubleValue]; [self saveSoon]; [self refresh]; [self checkIdle]; }
-- (void)about:(id)sender { (void)sender; [NSApp orderFrontStandardAboutPanelWithOptions:@{NSAboutPanelOptionApplicationName:@"Eimerrail",NSAboutPanelOptionApplicationVersion:@"0.1",NSAboutPanelOptionVersion:@"A personal native browser with Chromium Embedded Framework."}]; }
+
+#pragma mark Settings host
+- (rail::BrowserModel &)settingsModel { return _model; }
+- (rail::Projects &)settingsProjects { return _projects; }
+- (const rail::StatusSnapshot &)settingsStatus { return [_status snapshot]; }
+- (void)settingsChanged { RailSetTheme(S(_model.state.theme)); [self refresh]; [self layout]; [self saveSoon]; [self checkIdle]; }
+- (void)settingsProjectsChanged { [self projectsChanged]; [self refreshHome]; }
+- (void)settingsSetDevToolsDocked:(BOOL)docked { if (_model.state.devToolsDocked!=(bool)docked) [self toggleDevToolsDock:nil]; }
+- (void)settingsSignIn:(const std::string &)connectionID { [self signInConnection:connectionID]; }
+- (void)settingsShowSpaceHome:(const std::string &)spaceID {
+  if (_model.state.activeSpaceID!=spaceID) { _model.selectSpace(spaceID,Now()); [self ensureBrowser:_model.state.activeTabID]; }
+  [self showHome:nil]; [_window makeKeyAndOrderFront:nil];
+}
+- (void)about:(id)sender { (void)sender; [NSApp orderFrontStandardAboutPanelWithOptions:@{NSAboutPanelOptionApplicationName:@"Rail",NSAboutPanelOptionApplicationVersion:@"0.1",NSAboutPanelOptionVersion:@"A personal native browser with Chromium Embedded Framework."}]; }
 - (BOOL)windowShouldClose:(NSWindow *)sender { (void)sender; [self quit:nil]; return NO; }
 - (void)quit:(id)sender {
+  [_passwordService stop]; [_passwordPalette close];
   (void)sender; if (_quitting) return; _quitting=YES; [self saveNow];
   // Chromium can't shut down while the reader's hidden browser is open.
   __weak BrowserController *weak=self;
@@ -1251,7 +1687,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   for (const auto &id:ids) [self closeRuntime:id reason:CloseReason::Quit session:""];
 }
 - (void)finishQuit { [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [self saveNow]; _contexts.clear(); [_window orderOut:nil]; CefQuitMessageLoop(); }
-- (void)dealloc { [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [_saveTimer invalidate]; _window.delegate=nil; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [_saveTimer invalidate]; _window.delegate=nil; }
 
 #pragma mark Reading
 - (CGFloat)shownSidebarWidth { return _readingVisible ? MAX(292,_model.state.sidebarWidth) : _model.state.sidebarWidth; }
@@ -1311,14 +1747,14 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)refreshReadingChrome {
   const BOOL reading=_readingVisible;
   _reading.reader.hidden=!reading; _reading.sidebar.hidden=!reading;
-  for (NSView *view in @[_spaceLabel,_spaceSubtitle,_spaceOptions,_tabScroll,_sleepLabel]) view.hidden=reading;
+  for (NSView *view in @[_spaceLabel,_spaceOptions,_tabScroll,_sleepLabel]) view.hidden=reading;
   NSString *url=reading ? _reading.selectedURL : nil;
   _readerChip.hidden=!(reading && _reading.selectedHasArticle) || _editingAddress;
   // The rail's badge is rebuilt with the rest of the rail; only do that when the number changed.
   if (_shownUnread!=_reading.unreadCount) { _shownUnread=_reading.unreadCount; __weak BrowserController *weak=self; dispatch_async(dispatch_get_main_queue(), ^{ [weak refresh]; }); }
   if (!reading) { if (_sessionPicker.hidden) { _sessionPicker.hidden=NO; [self layout]; } return; }
   if (!_editingAddress) { _address.stringValue=url ? DisplayAddress(C(url)) : @""; _addressBar.symbolName=url ? AddressSymbol(C(url)) : @"tray"; _address.placeholderString=@"Search or enter address"; }
-  _window.title=[NSString stringWithFormat:@"%@ — Eimerrail",_reading.selectedTitle ?: @"Reading"];
+  _window.title=[NSString stringWithFormat:@"%@ — Rail",_reading.selectedTitle ?: @"Reading"];
   // The picker sets the session the page is read in; a one-off isolated profile would forget it.
   [_sessionPicker removeAllItems];
   for (const auto &session : _model.state.sessions) { [_sessionPicker addItemWithTitle:S(session.name)]; _sessionPicker.lastItem.representedObject=S(session.id); }
@@ -1372,8 +1808,13 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 }
 - (void)showHome:(id)sender {
   (void)sender; if (_quitting) return;
-  _homeVisible=YES; _readingVisible=NO; _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
+  _homeVisible=YES; _readingVisible=NO; _homePage=0; _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
   [self refresh]; [self checkProjects:NO];
+}
+- (void)showActivity:(id)sender {
+  (void)sender; if (_quitting) return;
+  _homeVisible=YES; _readingVisible=NO; _homePage=1; _statusMessage=nil; _editingAddress=NO; [self hideSuggestions];
+  [self refresh]; [_window makeFirstResponder:_activity]; [self checkProjects:NO];
 }
 - (void)checkProjects:(BOOL)force {
   std::vector<rail::Project> list; for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) list.push_back(*project);
@@ -1479,8 +1920,10 @@ static ProjectTone RunTone(const std::string &result) {
     if (!attention.empty()) card.detail=S(attention.front().detail);
     else if (project->environments.empty()) card.detail=@"Add where it runs: right-click a tab and choose Add to Project, or use … → Add Environment.";
     NSMutableArray *rows=[NSMutableArray array], *chips=[NSMutableArray array];
+    // Session markers only call out steps that open outside the Space's own session.
+    const auto *home=_model.space(project->spaceID); std::string spaceSession=home ? home->sessionID : "";
     for (const auto &link : project->links) {
-      std::string url=link.url,session=link.sessionID,lid=link.id; NSInteger style=0; NSString *mark=[self sessionMark:session style:&style];
+      std::string url=link.url,session=link.sessionID,lid=link.id; NSInteger style=0; NSString *mark=session==spaceSession ? nil : [self sessionMark:session style:&style];
       if (link.kind=="custom") {
         ProjectChip *chip=[[ProjectChip alloc] init]; NSString *tag=nil;
         for (const auto &e : project->environments) if (e.id==link.environmentID) tag=S(e.name);
@@ -1493,11 +1936,11 @@ static ProjectTone RunTone(const std::string &result) {
       row.symbol=link.kind=="repo" ? @"arrow.triangle.branch" : @"arrow.triangle.2.circlepath";
       row.help=[NSString stringWithFormat:@"%@ · opens in %@",S(link.url),[self sessionName:session]];
       if (link.kind=="repo") {
-        if (source && source->openPullRequests>=0) row.value=source->openPullRequests==1 ? @"1 open PR" : source->openPullRequests ? [NSString stringWithFormat:@"%d open PRs",source->openPullRequests] : @"No open PRs";
+        if (source && source->openPullRequests>=0) row.value=source->openPullRequests==1 ? @"1 open PR" : source->openPullRequests ? [NSString stringWithFormat:@"%d open PRs",source->openPullRequests] : @"no open PRs";
         else row.value=@"";
       } else {
         if (access && (access->access==rail::Access::signedOut || access->access==rail::Access::rejected)) { row.value=@"Sign-in needed"; row.tone=ProjectToneWarn; }
-        else if (source && source->notCovered) { row.value=@"Not visible to Eimerrail"; row.tone=ProjectToneWarn; }
+        else if (source && source->notCovered) { row.value=@"Not visible to Rail"; row.tone=ProjectToneWarn; }
         else if (source && !source->runs.empty()) {
           const rail::PipelineRun *shown=&source->runs.front();
           for (const auto &run : source->runs) if (run.result=="failed") { shown=&run; break; }
@@ -1516,8 +1959,8 @@ static ProjectTone RunTone(const std::string &result) {
     BOOL runsLocally=NO;
     for (const auto &environment : project->environments) {
       std::string url=environment.url,session=environment.sessionID,eid=environment.id; NSInteger style=0;
-      ProjectRow *row=[[ProjectRow alloc] init]; row.label=S(environment.name); row.mark=[self sessionMark:session style:&style]; row.markStyle=style;
-      BOOL local=rail::isLocalURL(url); row.symbol=local ? @"laptopcomputer" : @"globe";
+      ProjectRow *row=[[ProjectRow alloc] init]; row.label=S(environment.name); row.mark=session==spaceSession ? nil : [self sessionMark:session style:&style]; row.markStyle=style;
+      BOOL local=rail::isLocalURL(url); row.symbol=local ? @"laptopcomputer" : @"globe"; row.local=local;
       ProjectTone tone=ProjectToneUnknown; row.value=[self environmentValue:environment tone:&tone]; row.tone=tone;
       if (local && tone==ProjectToneRunning) runsLocally=YES;
       row.help=[NSString stringWithFormat:@"%@ · opens in %@",S(url),[self sessionName:session]];
@@ -1525,6 +1968,7 @@ static ProjectTone RunTone(const std::string &result) {
       [rows addObject:row];
     }
     card.rows=rows; card.chips=chips; card.runsLocally=runsLocally;
+    if (source) for (const auto &run : source->runs) if (run.result=="running" || run.result=="queued") card.moving=YES;
     card.needsAttention=std::any_of(attention.begin(),attention.end(),[](const rail::Attention &a) { return a.tone==rail::Tone::critical || a.tone==rail::Tone::warn; });
     card.menu=[self menuForProject:pid];
     [cards addObject:card];
@@ -1532,8 +1976,120 @@ static ProjectTone RunTone(const std::string &result) {
   // Cards that need attention come first; otherwise the user's order holds.
   return [cards sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(ProjectCard *a, ProjectCard *b) { return a.needsAttention==b.needsAttention ? NSOrderedSame : a.needsAttention ? NSOrderedAscending : NSOrderedDescending; }];
 }
+#pragma mark Activity
+
+static ProjectTone CheckTone(const std::string &state) {
+  if (state=="succeeded") return ProjectToneOK;
+  if (state=="failed") return ProjectToneCritical;
+  if (state=="running") return ProjectToneRunning;
+  if (state=="skipped") return ProjectToneStopped;
+  return ProjectToneUnknown;
+}
+static NSString *Initials(NSString *name) {
+  NSMutableString *out=[NSMutableString string];
+  for (NSString *part in [name componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@" ._-"]]) {
+    if (part.length && out.length<2) [out appendString:[[part substringToIndex:1] uppercaseString]];
+  }
+  if (out.length==1 && name.length>1) [out appendString:[name substringWithRange:NSMakeRange(1,1)].uppercaseString];
+  return out.length ? out : @"?";
+}
+static NSString *ShortAge(double time) {
+  if (time<=0) return @"";
+  double seconds=MAX(0,Now()-time);
+  if (seconds<3600) return [NSString stringWithFormat:@"%.0f m",MAX(1,seconds/60)];
+  if (seconds<86400) return [NSString stringWithFormat:@"%.0f h",seconds/3600];
+  return [NSString stringWithFormat:@"%.0f d",seconds/86400];
+}
+// The user's own open pull requests in the projects of a Space.
+- (std::vector<std::pair<const rail::Project *, const rail::PullRequest *>>)pullRequestsInSpace:(std::string)spaceID {
+  std::vector<std::pair<const rail::Project *, const rail::PullRequest *>> out; const auto &status=[_status snapshot]; std::set<std::string> seen;
+  for (const auto *project : _projects.inSpace(spaceID)) for (const auto &binding : project->sources) {
+    auto found=status.sources.find(rail::sourceKey(binding)); if (found==status.sources.end()) continue;
+    for (const auto &pr : found->second.myPullRequests) if (seen.insert(pr.url).second) out.push_back({project,&pr});
+  }
+  return out;
+}
+- (NSUInteger)activityCountInSpace:(std::string)spaceID {
+  NSUInteger count=0;
+  for (const auto &[project,pr] : [self pullRequestsInSpace:spaceID]) { (void)project; if (rail::pullRequestStage(*pr)==rail::PullRequestStage::needsYou) count++; }
+  return count;
+}
+- (NSArray<ActivityItem *> *)activityItems {
+  NSMutableArray *items=[NSMutableArray array]; __weak BrowserController *weak=self;
+  for (const auto &[project,pr] : [self pullRequestsInSpace:_model.state.activeSpaceID]) {
+    std::string session=_projects.accessSession(*project); if (session.empty()) session=_model.space(project->spaceID)->sessionID;
+    BOOL github=pr->url.find("github.com")!=std::string::npos;
+    ActivityItem *item=[[ActivityItem alloc] init]; item.key=S(pr->url); item.title=S(pr->title); item.project=S(project->name);
+    item.number=[NSString stringWithFormat:@"%@%@",github ? @"#" : @"!",S(pr->id)]; item.provider=github ? 2 : 1;
+    item.branches=[NSString stringWithFormat:@"%@ → %@",S(pr->sourceBranch),S(pr->targetBranch)];
+    item.age=ShortAge(pr->createdAt); item.opened=pr->createdAt>0 ? [@"opened " stringByAppendingString:Ago(pr->createdAt)] : @"";
+    auto stage=rail::pullRequestStage(*pr); item.stage=stage==rail::PullRequestStage::needsYou ? 0 : stage==rail::PullRequestStage::waiting ? 1 : 2;
+    item.reason=S(rail::pullRequestReason(*pr));
+    item.reasonTone=item.stage==0 ? (pr->conflicts || rail::pullRequestChecks(*pr)=="failed" ? ProjectToneCritical : ProjectToneWarn) : item.stage==2 ? ProjectToneOK : ProjectToneNeutral;
+    std::string overall=rail::pullRequestChecks(*pr);
+    item.checksTone=overall=="failed" ? ProjectToneCritical : overall=="running" ? ProjectToneRunning : overall=="succeeded" ? (item.stage==0 ? ProjectToneWarn : ProjectToneOK) : item.stage==0 ? ProjectToneWarn : ProjectToneUnknown;
+    item.openTitle=github ? @"Open on GitHub" : @"Open in Azure DevOps";
+    NSInteger style=0; item.mark=[self sessionMark:session style:&style]; item.markStyle=style;
+    std::string url=pr->url; item.open=^{ [weak openProjectURL:url session:session exact:YES]; };
+    NSMutableArray *checks=[NSMutableArray array], *policies=[NSMutableArray array], *reviewers=[NSMutableArray array];
+    int failed=0, passed=0;
+    for (const auto &check : pr->checks) {
+      ActivityStep *step=[[ActivityStep alloc] init]; step.title=S(check.name); step.tone=CheckTone(check.state);
+      NSString *state=check.state=="succeeded" ? @"passed" : check.state=="failed" ? @"failed" : check.state=="running" ? @"running" : check.state=="skipped" ? @"skipped" : @"pending";
+      step.detail=check.detail.empty() ? state : [NSString stringWithFormat:@"%@ · %@",S(check.detail),state];
+      if (!check.blocking) step.detail=[step.detail stringByAppendingString:@" · optional"];
+      if (!check.url.empty()) { std::string target=check.url; step.help=S(target); step.handler=^{ [weak openProjectURL:target session:session exact:YES]; }; }
+      if (check.kind=="build") { [checks addObject:step]; if (check.state=="failed" && check.blocking) failed++; if (check.state=="succeeded") passed++; }
+      else [policies addObject:step];
+    }
+    int approvals=0;
+    for (const auto &reviewer : pr->reviewers) {
+      ActivityStep *step=[[ActivityStep alloc] init]; step.title=S(reviewer.name); step.initials=Initials(S(reviewer.name));
+      step.tone=reviewer.vote=="approved" ? ProjectToneOK : reviewer.vote=="rejected" ? ProjectToneCritical : reviewer.vote=="waiting" ? ProjectToneWarn : ProjectToneNeutral;
+      NSString *vote=reviewer.vote=="approved" ? @"approved" : reviewer.vote=="rejected" ? (github ? @"requested changes" : @"rejected") : reviewer.vote=="waiting" ? @"waiting for you" : @"no vote yet";
+      step.detail=reviewer.required ? [vote stringByAppendingString:@" · required"] : vote; if (reviewer.vote=="approved") approvals++;
+      [reviewers addObject:step];
+    }
+    item.checks=checks; item.policies=policies; item.reviewers=reviewers;
+    NSMutableArray *pills=[NSMutableArray array];
+    auto pill=^(NSString *title, NSString *symbol, ProjectTone tone) { ProjectPill *p=[[ProjectPill alloc] init]; p.title=title; p.symbol=symbol; p.tone=tone; [pills addObject:p]; };
+    if (pr->draft) pill(@"Draft",@"pencil",ProjectToneNeutral);
+    if (pr->conflicts) pill(@"Merge conflicts",@"exclamationmark.triangle",ProjectToneCritical);
+    if (failed) pill(failed==1 ? @"1 check failed" : [NSString stringWithFormat:@"%d checks failed",failed],@"xmark.circle",ProjectToneCritical);
+    else if (overall=="running") pill(@"Checks running",@"clock",ProjectToneInfo);
+    else if (overall=="succeeded") pill(passed==1 ? @"1 check passed" : [NSString stringWithFormat:@"%d checks passed",passed],@"checkmark",ProjectToneOK);
+    if (pr->openThreads>0) pill(pr->openThreads==1 ? @"1 open thread" : [NSString stringWithFormat:@"%d open threads",pr->openThreads],@"text.bubble",ProjectToneWarn);
+    if (!pr->reviewers.empty()) pill([NSString stringWithFormat:@"%d of %lu approved",approvals,(unsigned long)pr->reviewers.size()],@"person.2",approvals ? ProjectToneInfo : ProjectToneNeutral);
+    if (pr->autoComplete) pill(@"Auto-complete on",@"arrow.triangle.merge",ProjectToneInfo);
+    item.pills=pills;
+    [items addObject:item];
+  }
+  return items;
+}
+- (void)refreshActivity {
+  const auto *space=_model.space(_model.state.activeSpaceID); NSString *spaceName=space ? S(space->name) : @"this Space";
+  NSArray<ActivityItem *> *items=[self activityItems]; const auto &status=[_status snapshot];
+  NSUInteger needsYou=0; for (ActivityItem *item in items) if (item.stage==0) needsYou++;
+  BOOL anySource=NO, known=NO, signedOut=NO; double checked=0;
+  for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) for (const auto &binding : project->sources) {
+    anySource=YES; auto found=status.sources.find(rail::sourceKey(binding));
+    if (found!=status.sources.end()) { known=known || found->second.myPullRequestsKnown; checked=MAX(checked,found->second.checkedAt); }
+    auto connection=status.connections.find(binding.connectionID);
+    if (connection!=status.connections.end() && (connection->second.access==rail::Access::signedOut || connection->second.access==rail::Access::rejected)) signedOut=YES;
+  }
+  NSMutableArray *summary=[NSMutableArray array];
+  if (items.count) [summary addObject:needsYou ? [NSString stringWithFormat:@"%lu need%@ you",(unsigned long)needsYou,needsYou==1 ? @"s" : @""] : [NSString stringWithFormat:@"%lu open",(unsigned long)items.count]];
+  if (checked>0) { NSDateFormatter *time=[[NSDateFormatter alloc] init]; time.dateStyle=NSDateFormatterNoStyle; time.timeStyle=NSDateFormatterShortStyle; [summary addObject:[@"Checked " stringByAppendingString:[time stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]]]; }
+  if (!anySource) { _activity.emptyTitle=[NSString stringWithFormat:@"No repositories in %@ yet",spaceName]; _activity.emptyDetail=@"Activity shows your own open pull requests, with their checks and reviews, from the repositories of this Space's projects. Add a project with an Azure DevOps or GitHub repository."; }
+  else if (signedOut && !known) { _activity.emptyTitle=@"Sign in to see your pull requests"; _activity.emptyDetail=@"A repository connection in this Space needs you to sign in. Open Projects to sign in, then check again."; }
+  else if (!known) { _activity.emptyTitle=@"Checking your pull requests…"; _activity.emptyDetail=@"Your open pull requests appear here once the repositories have answered."; }
+  else { _activity.emptyTitle=@"No open pull requests of yours"; _activity.emptyDetail=[NSString stringWithFormat:@"Pull requests you open in %@'s repositories show up here with their checks, policies and reviewers.",spaceName]; }
+  _activity.summary=[summary componentsJoinedByString:@" · "]; _activity.items=items; _activity.selectedKey=_activitySelection; _activity.checking=[_status isChecking];
+  [_activity reload];
+}
 - (void)refreshHome {
   if (!_homeVisible || !_home) return;
+  if (_homePage==1) { [self refreshActivity]; return; }
   const auto *space=_model.space(_model.state.activeSpaceID);
   NSArray<ProjectCard *> *cards=[self projectCards];
   NSUInteger attention=0, local=0; double checked=0; const auto &status=[_status snapshot];
@@ -1721,6 +2277,7 @@ static ProjectTone RunTone(const std::string &result) {
     return !_quitting && !_automation && !_updater.running;
   }
   if (item.action==@selector(showDevTools:)) return !_quitting && ((NSApp.keyWindow && NSApp.keyWindow!=_window) || (!_homeVisible && !_readingVisible && [self activeBrowser]!=nullptr));
+  if (item.action==@selector(toggleDevToolsDock:)) { item.state=_model.state.devToolsDocked ? NSControlStateValueOn : NSControlStateValueOff; return YES; }
   if (item.action==@selector(addCurrentPageAsProject:)) { const auto *active=_model.tab(_model.state.activeTabID); return active && rail::recognizeRepo(active->url); }
   return YES;
 }
@@ -1735,7 +2292,7 @@ static ProjectTone RunTone(const std::string &result) {
                     @{@"key":@"session",@"label":@"Open in",@"options":[self sessionOptionsWithIsolated:@"Its own isolated profile" current:current owner:owner],@"value":existing ? [self sessionOptionValue:current owner:owner] : S(current)}];
   __weak BrowserController *weak=self;
   [self showForm:existing ? @"Edit environment" : [NSString stringWithFormat:@"Add an environment to %@",S(project->name)]
-            info:@"Eimerrail checks local addresses by connecting to their port, and remote ones with a request that carries no cookies. Its own isolated profile keeps a separate login, for example for PROD." fields:fields button:existing ? @"Save" : @"Add Environment" completion:^(NSDictionary *values) {
+            info:@"Rail checks local addresses by connecting to their port, and remote ones with a request that carries no cookies. Its own isolated profile keeps a separate login, for example for PROD." fields:fields button:existing ? @"Save" : @"Add Environment" completion:^(NSDictionary *values) {
     BrowserController *strong=weak; if (!strong) return;
     NSString *address=[strong addressFromInput:values[@"url"]];
     if (!address) { [strong showMessage:@"That address doesn't look right." info:@"Use an address such as https://billing-int.example.com or localhost:3000."]; return; }
@@ -1785,7 +2342,7 @@ static ProjectTone RunTone(const std::string &result) {
   __weak BrowserController *weak=self; std::string spaceID=space->id;
   NSArray *fields=@[@{@"key":@"org",@"label":@"Organization",@"value":[self likelyAzureOrganization],@"placeholder":@"contoso"},
                     @{@"key":@"session",@"label":@"Signed in as",@"options":[self sessionOptionsWithIsolated:nil current:"" owner:""],@"value":S(space->sessionID)}];
-  [self showForm:@"Import from Azure DevOps" info:@"Eimerrail lists the organization's repositories using the login in the chosen session. Nothing is stored except the projects you pick." fields:fields button:@"List Repositories" completion:^(NSDictionary *values) {
+  [self showForm:@"Import from Azure DevOps" info:@"Rail lists the organization's repositories using the login in the chosen session. Nothing is stored except the projects you pick." fields:fields button:@"List Repositories" completion:^(NSDictionary *values) {
     BrowserController *strong=weak; if (!strong) return; NSString *org=values[@"org"], *session=values[@"session"];
     [strong setStatus:@"Loading repositories…"]; strong->_loadingRepositories=YES; [strong refreshHome];
     [strong->_status azureRepositories:org session:session completion:^(NSArray<ProjectRepository *> *repositories, NSString *error, BOOL signedOut) {
@@ -1800,7 +2357,7 @@ static ProjectTone RunTone(const std::string &result) {
   (void)sender; const auto *space=_model.space(_model.state.activeSpaceID); if (!space) return;
   __weak BrowserController *weak=self; std::string spaceID=space->id;
   NSArray *fields=@[@{@"key":@"session",@"label":@"Signed in as",@"options":[self sessionOptionsWithIsolated:nil current:"" owner:""],@"value":S(space->sessionID)}];
-  [self showForm:@"Import from GitHub" info:@"Eimerrail uses its GitHub App to read repositories, workflow runs and pull requests. The first time, GitHub asks you to authorize it in the chosen session." fields:fields button:@"Continue" completion:^(NSDictionary *values) {
+  [self showForm:@"Import from GitHub" info:@"Rail uses its GitHub App to read repositories, workflow runs and pull requests. The first time, GitHub asks you to authorize it in the chosen session." fields:fields button:@"Continue" completion:^(NSDictionary *values) {
     BrowserController *strong=weak; if (!strong) return; std::string session=C(values[@"session"]);
     std::string connectionID=strong->_projects.ensureConnection("github","",session); strong->_projectsDirty=YES; [strong saveSoon];
     void (^list)(void)=^{ BrowserController *inner=weak; if (!inner) return; [inner setStatus:@"Loading repositories…"]; inner->_loadingRepositories=YES; [inner refreshHome];
@@ -1814,7 +2371,7 @@ static ProjectTone RunTone(const std::string &result) {
   }];
 }
 - (void)chooseRepositories:(NSArray<ProjectRepository *> *)found title:(NSString *)title space:(std::string)spaceID session:(std::string)session {
-  if (!found.count) { [self showMessage:@"No repositories found" info:@"Nothing in this account is visible to Eimerrail."]; return; }
+  if (!found.count) { [self showMessage:@"No repositories found" info:@"Nothing in this account is visible to Rail."]; return; }
   // Grouped by owner (GitHub user or organization, Azure DevOps project), both levels alphabetical.
   NSArray<ProjectRepository *> *repositories=[found sortedArrayUsingComparator:^NSComparisonResult(ProjectRepository *a, ProjectRepository *b) {
     NSComparisonResult owner=[a.detail localizedCaseInsensitiveCompare:b.detail]; return owner!=NSOrderedSame ? owner : [a.name localizedCaseInsensitiveCompare:b.name]; }];
@@ -1846,7 +2403,7 @@ static ProjectTone RunTone(const std::string &result) {
   }];
 }
 - (void)offerSignIn:(NSString *)title url:(std::string)url session:(std::string)session {
-  NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=title; alert.informativeText=@"Eimerrail reads Azure DevOps with the login of that session. Sign in there, then try again.";
+  NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=title; alert.informativeText=@"Rail reads Azure DevOps with the login of that session. Sign in there, then try again.";
   [alert addButtonWithTitle:@"Open Azure DevOps"]; [alert addButtonWithTitle:@"Cancel"]; __weak BrowserController *weak=self;
   [alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse result) { if (result==NSAlertFirstButtonReturn) [weak openProjectURL:url session:session exact:NO]; }];
 }
@@ -1865,7 +2422,7 @@ static ProjectTone RunTone(const std::string &result) {
     BrowserController *strong=weak; if (!strong) return;
     [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setString:code forType:NSPasteboardTypeString];
     prompt=[[NSAlert alloc] init]; prompt.messageText=[NSString stringWithFormat:@"Enter %@ on GitHub",code];
-    prompt.informativeText=[NSString stringWithFormat:@"The code is on your clipboard. GitHub opens in the %@ session, where you're usually signed in already. Paste the code and authorize Eimerrail; this closes on its own.",sessionName];
+    prompt.informativeText=[NSString stringWithFormat:@"The code is on your clipboard. GitHub opens in the %@ session, where you're usually signed in already. Paste the code and authorize Rail; this closes on its own.",sessionName];
     [prompt addButtonWithTitle:@"Open GitHub"]; [prompt addButtonWithTitle:@"Cancel"];
     [prompt beginSheetModalForWindow:strong->_window completionHandler:^(NSModalResponse result) {
       BrowserController *inner=weak; if (!inner) return;
@@ -1921,6 +2478,10 @@ static ProjectTone RunTone(const std::string &result) {
     else if ([action isEqual:@"sheetCancel"]) { if (_window.attachedSheet) [_window endSheet:_window.attachedSheet returnCode:NSModalResponseAbort]; }
     else if ([action isEqual:@"reading"]) { if (!_readingVisible) [self showReading:nil]; }
     else if ([action hasPrefix:@"reading"]) [_reading runAutomation:command action:action];
+    else if ([action isEqual:@"settings"]) [self showSettingsPane:command[@"pane"]];
+    else if ([action isEqual:@"passwords"]) [self showPasswords:nil];
+    else if ([action isEqual:@"passwordControl"] && _passwordFixtureOrigin.length) [_passwordPalette driveFixture:command];
+    else if ([action isEqual:@"theme"]) { NSString *theme=[command[@"theme"] isKindOfClass:NSString.class] ? command[@"theme"] : @""; _model.state.theme=C([RailThemeIDs() containsObject:theme] ? theme : @"porcelain"); [self settingsChanged]; }
     else if ([action isEqual:@"menu"]) {
       for (NSMenuItem *group in NSApp.mainMenu.itemArray) {
         NSInteger index=[group.submenu indexOfItemWithTitle:command[@"title"] ?: @""];
@@ -1940,8 +2501,8 @@ static ProjectTone RunTone(const std::string &result) {
       dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (!strong) return; ((NSTextView *)strong->_address.currentEditor).string=text; [strong suggestFor:text inline:YES]; });
     }
     else if ([action isEqual:@"keys"]) {
-      // Real key events through the field editor, one per character, for address bar tests.
-      if (!_address.currentEditor) [self focusAddress:nil];
+      // Real key events through the active address or find field editor.
+      if (!_findField.currentEditor && !_address.currentEditor) [self focusAddress:nil];
       NSString *text=command[@"text"] ?: @"";
       for (NSUInteger i=0;i<text.length;i++) {
         NSString *character=[text substringWithRange:NSMakeRange(i,1)]; BOOL back=[character isEqual:@"\b"];
@@ -1954,6 +2515,11 @@ static ProjectTone RunTone(const std::string &result) {
       NSTextView *editor=(NSTextView *)_address.currentEditor;
       [@{@"text":editor.string ?: @"",@"selection":NSStringFromRange(editor.selectedRange)} writeToFile:[_directory stringByAppendingPathComponent:@"address.plist"] atomically:YES];
     }
+    else if ([action isEqual:@"findControl"]) {
+      NSString *control=command[@"control"];
+      RailButton *button=[control isEqual:@"next"] ? _findNext : [control isEqual:@"previous"] ? _findPrevious : [control isEqual:@"close"] ? _findClose : nil;
+      [button performClick:nil];
+    }
     else if ([action isEqual:@"shortcut"]) {
       NSString *key=command[@"key"] ?: @"s";
       NSEventModifierFlags flags=NSEventModifierFlagCommand;
@@ -1964,6 +2530,9 @@ static ProjectTone RunTone(const std::string &result) {
       unsigned short keyCode=[command[@"keyCode"] isKindOfClass:NSNumber.class] ? [command[@"keyCode"] unsignedShortValue] : 1;
       BOOL release=[command[@"release"] boolValue];
       NSWindow *targetWindow=[command[@"window"] isEqual:@"key"] ? NSApp.keyWindow : _window;
+      // Native fixture shortcuts stay bound to their panel even when the user
+      // switches to another app while a disposable-profile smoke is running.
+      if (_passwordFixtureOrigin.length && [command[@"window"] isEqual:@"passwords"]) targetWindow=_passwordPalette.panel;
       NSEvent *event=[NSEvent keyEventWithType:release ? NSEventTypeFlagsChanged : NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:targetWindow.windowNumber context:nil characters:release ? @"" : key charactersIgnoringModifiers:release ? @"" : key isARepeat:NO keyCode:release ? 59 : keyCode];
       [NSApp sendEvent:event];
     }
@@ -1976,8 +2545,18 @@ static ProjectTone RunTone(const std::string &result) {
       [hierarchy writeToFile:[_directory stringByAppendingPathComponent:@"native-layout.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
       NSBitmapImageRep *rep=[_root bitmapImageRepForCachingDisplayInRect:_root.bounds]; [_root cacheDisplayInRect:_root.bounds toBitmapImageRep:rep];
       [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[_directory stringByAppendingPathComponent:@"native-window.png"] atomically:YES];
+      if (_settingsWindow.window.isVisible) {
+        NSView *view=_settingsWindow.window.contentView; NSBitmapImageRep *settings=[view bitmapImageRepForCachingDisplayInRect:view.bounds]; [view cacheDisplayInRect:view.bounds toBitmapImageRep:settings];
+        [[settings representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[_directory stringByAppendingPathComponent:@"settings-window.png"] atomically:YES];
+      }
+      if (_passwordFixtureOrigin.length && _passwordPalette.panel.isVisible) {
+        [_passwordPalette.panel displayIfNeeded];
+        NSView *view=_passwordPalette.panel.contentView; NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds]; [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
+        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[_directory stringByAppendingPathComponent:@"password-palette.png"] atomically:YES];
+      }
     }
     else if ([action isEqual:@"home"]) [self showHome:nil];
+    else if ([action isEqual:@"activity"]) [self showActivity:nil];
     else if ([action isEqual:@"addProject"]) { _projects.addProject(C(command[@"name"] ?: @""),_model.state.activeSpaceID,C(command[@"repo"] ?: @""),C(command[@"session"] ?: @"work")); [self projectsChanged]; }
     else if ([action isEqual:@"addEnvironment"] || [action isEqual:@"addLink"]) {
       std::string project; for (const auto &p : _projects.state.projects) if (p.name==C(command[@"project"] ?: @"") || p.id==C(command[@"project"] ?: @"")) project=p.id;
@@ -2018,7 +2597,11 @@ static ProjectTone RunTone(const std::string &result) {
   }
   NSMutableArray *sheetText=[NSMutableArray array];
   if (NSView *content=_window.attachedSheet.contentView) { NSMutableArray<NSView *> *queue=[NSMutableArray arrayWithObject:content]; while (queue.count) { NSView *v=queue.firstObject; [queue removeObjectAtIndex:0]; [queue addObjectsFromArray:v.subviews]; if ([v isKindOfClass:NSTextField.class] && ((NSTextField *)v).stringValue.length) [sheetText addObject:((NSTextField *)v).stringValue]; if ([v isKindOfClass:NSButton.class]) [sheetText addObject:[@"[" stringByAppendingFormat:@"%@]",((NSButton *)v).title]]; } }
-  NSDictionary *snapshot=@{@"keyWindow":windowState,@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
+  auto findSlot=_runtime.find(_model.state.activeTabID);
+  NSTextView *findEditor=(NSTextView *)_findField.currentEditor;
+  NSResponder *responder=_window.firstResponder;
+  NSDictionary *find=@{@"visible":@(!_findBar.hidden),@"focused":@(findEditor!=nil),@"pageFocused":@([responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:_webHost]),@"selection":findEditor ? NSStringFromRange(findEditor.selectedRange) : @"",@"text":findSlot!=_runtime.end() ? S(findSlot->second.findText) : @"",@"count":@(findSlot!=_runtime.end() ? findSlot->second.findCount : 0),@"ordinal":@(findSlot!=_runtime.end() ? findSlot->second.findOrdinal : 0),@"pending":@(findSlot!=_runtime.end() && findSlot->second.findPending),@"label":_findCount.stringValue ?: @""};
+  NSDictionary *snapshot=@{@"keyWindow":windowState,@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"find":find,@"passwords":_passwordFixtureOrigin.length ? ([_passwordPalette automationState] ?: @{}) : @{},@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"homePage":_homePage == 1 ? @"activity" : @"projects",@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"settings":_settingsWindow.window.isVisible ? _settingsWindow.pane : @"",@"sidebarAnimation":S(_model.state.sidebarAnimation),@"theme":S(_model.state.theme),@"appliedTheme":RailCurrentTheme(),@"appearance":_window.effectiveAppearance.name ?: @"",@"settingsAppearance":_settingsWindow.window.effectiveAppearance.name ?: @"",@"windowNumber":@(_window.windowNumber),@"rootSize":@[@(_root.bounds.size.width),@(_root.bounds.size.height)],@"settingsWindowNumber":@(_settingsWindow.window.isVisible ? _settingsWindow.window.windowNumber : 0),@"devTools":[self activeDevToolsMode],@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
   [[NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
 }
 @end

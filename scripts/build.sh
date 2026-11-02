@@ -9,4 +9,4 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DPROJECT_ARCH=arm64 -DUSE_SANDBOX=ON "$@"
 "$ROOT/.tools/bin/cmake" --build "$ROOT/build" --config "$BUILD_TYPE" --parallel "${BUILD_JOBS:-6}"
 "$ROOT/.tools/bin/ctest" --test-dir "$ROOT/build" --build-config "$BUILD_TYPE" --output-on-failure
-echo "Built $ROOT/build/$BUILD_TYPE/Eimerrail.app"
+echo "Built $ROOT/build/$BUILD_TYPE/Rail.app"

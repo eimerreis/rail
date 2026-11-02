@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          "design/projects-activity/b-split.html"
+        ],
+        "createdAt": "2026-10-30T09:15:33.270Z",
+        "reason": "design/DESIGN.md: Rail light native shell type scale is 9-14px; native macOS chrome mockup, same exception as design/project-overview"
+      }
+    ]
+  }
+}

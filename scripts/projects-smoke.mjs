@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Projects integration check: Space home, health checks, sign-in states, opening environments, persistence.
+// Projects integration check: Space home (Projects and Activity), health checks, sign-in states, opening environments, persistence.
 // Uses a disposable profile, a localhost fixture, example.com (reachable) and a .invalid host (unreachable).
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -47,7 +47,7 @@ async function start() {
   await rm(resolve(profile, 'automation-state.json'), { force: true });
   await rm(resolve(profile, 'automation-command.json'), { force: true });
   const log = openSync(resolve(profile, 'app.log'), 'a');
-  child = spawn(resolve(root, 'build/Release/Eimerrail.app/Contents/MacOS/Eimerrail'), [`--data-dir=${profile}`, '--automation'], { stdio: ['ignore', log, log] });
+  child = spawn(resolve(root, 'build/Release/Rail.app/Contents/MacOS/Rail'), [`--data-dir=${profile}`, '--automation'], { stdio: ['ignore', log, log] });
   closeSync(log);
   return until('startup', state, 30000);
 }
@@ -68,7 +68,7 @@ try {
   await command('addProject', { name: 'Billing API', repo: 'https://dev.azure.com/contoso/Billing/_git/billing-api', session: 'work' });
   await command('addEnvironment', { project: 'Billing API', name: 'Local', url: `http://localhost:${localPort}`, session: 'work' });
   await command('addEnvironment', { project: 'Billing API', name: 'INT', url: 'https://example.com', session: 'work' });
-  await command('addEnvironment', { project: 'Billing API', name: 'PROD', url: 'https://billing.eimerrail-test.invalid', session: '__isolated__' });
+  await command('addEnvironment', { project: 'Billing API', name: 'PROD', url: 'https://billing.rail-test.invalid', session: '__isolated__' });
   await command('addLink', { project: 'Billing API', label: 'LaunchDarkly', url: 'https://app.launchdarkly.com/billing/production/features', session: 'work' });
   await command('addProject', { name: 'Webhook Relay', repo: 'https://github.com/contoso/webhook-relay', session: 'work' });
   await command('addEnvironment', { project: 'Webhook Relay', name: 'Local', url: `http://127.0.0.1:${stoppedPort}`, session: 'work' });
@@ -94,6 +94,14 @@ try {
   passed('signed-out Azure DevOps session and missing GitHub sign-in become attention items');
   await pause(500); await command('capture'); await copyFile(resolve(profile, 'native-window.png'), resolve(profile, 'home-cards.png'));
 
+  await command('activity');
+  s = await state();
+  assert.equal(s.home, true); assert.equal(s.homePage, 'activity');
+  await pause(300); await command('capture'); await copyFile(resolve(profile, 'native-window.png'), resolve(profile, 'home-activity.png'));
+  await command('home');
+  assert.equal((await state()).homePage, 'projects');
+  passed('Activity page opens and switches back to Projects');
+
   await command('openEnvironment', { project: 'Billing API', name: 'INT' });
   s = await state();
   assert.equal(s.home, false);
@@ -114,7 +122,7 @@ try {
   assert.ok(s.tabs.some(t => t.session === env(s, 'Billing API', 'PROD').session), 'tab keeps the project profile after restart');
   passed('projects and project-profile tabs persist across restart');
   await stop();
-  console.log(`\n${checks} project checks passed. Screenshots: ${profile}/home-empty.png, home-cards.png`);
+  console.log(`\n${checks} project checks passed. Screenshots: ${profile}/home-empty.png, home-cards.png, home-activity.png`);
 } catch (error) {
   console.error(`FAIL ${error.message}`);
   if (child) child.kill();

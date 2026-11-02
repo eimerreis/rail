@@ -16,7 +16,7 @@ shift 6
 fail() { echo "$*" >&2; exit 1; }
 [[ "$PARENT_PID" =~ ^[0-9]+$ ]] || fail "Invalid application process."
 [[ -d "$APP" && "$APP" == /*.app ]] || fail "Application bundle is missing: $APP"
-[[ -w "$(dirname "$APP")" && -w "$APP" ]] || fail "Move Eimerrail to a writable Applications folder, then try again."
+[[ -w "$(dirname "$APP")" && -w "$APP" ]] || fail "Move Rail to a writable Applications folder, then try again."
 mkdir -p "$CACHE"
 mkdir "$CACHE/lock" 2>/dev/null || fail "Another reinstall is running. If it was interrupted, remove $CACHE/lock and retry."
 STAGING=""
@@ -61,28 +61,28 @@ git -C "$SOURCE" fetch --depth 1 https://github.com/eimerreis/rail.git refs/head
 git -C "$SOURCE" checkout --detach FETCH_HEAD
 echo "Building $(git -C "$SOURCE" rev-parse HEAD)…"
 BUILD_TYPE=Release /bin/bash "$SOURCE/scripts/build.sh" \
-  "-DEIMERRAIL_SIGN_IDENTITY=$SIGN_IDENTITY" \
-  "-DEIMERRAIL_GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
-BUILT="$SOURCE/build/Release/Eimerrail.app"
+  "-DRAIL_SIGN_IDENTITY=$SIGN_IDENTITY" \
+  "-DRAIL_GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
+BUILT="$SOURCE/build/Release/Rail.app"
 codesign --verify --deep --strict "$BUILT"
 
 # Copy and verify on the destination volume before asking the browser to quit.
-STAGING="$(mktemp -d "$(dirname "$APP")/.eimerrail-update.XXXXXX")"
-ditto "$BUILT" "$STAGING/Eimerrail.app"
-codesign --verify --deep --strict "$STAGING/Eimerrail.app"
-echo "Build ready. Waiting for Eimerrail to quit…"
+STAGING="$(mktemp -d "$(dirname "$APP")/.rail-update.XXXXXX")"
+ditto "$BUILT" "$STAGING/Rail.app"
+codesign --verify --deep --strict "$STAGING/Rail.app"
+echo "Build ready. Waiting for Rail to quit…"
 touch "$RUN/ready"
 for ((attempt=0; attempt<120; attempt++)); do
   if ! kill -0 "$PARENT_PID" 2>/dev/null; then break; fi
   sleep 1
 done
 if kill -0 "$PARENT_PID" 2>/dev/null; then
-  fail "Eimerrail stayed open. Save any unsaved pages and try again."
+  fail "Rail stayed open. Save any unsaved pages and try again."
 fi
 
 BACKUP="$STAGING/Previous.app"
 mv "$APP" "$BACKUP"
-mv "$STAGING/Eimerrail.app" "$APP"
+mv "$STAGING/Rail.app" "$APP"
 open -n "$APP" --args "$@"
 # Once launch succeeds, cleanup errors must never roll back a working install.
 BACKUP=""

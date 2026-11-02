@@ -54,6 +54,13 @@ struct State {
     double sidebarWidth = 210;
     // Size of the sidebar, Spaces rail and Space home: small, normal or large.
     std::string controlSize = "small";
+    // How hiding and showing the sidebar animates: off, subtle or full.
+    std::string sidebarAnimation = "full";
+    // Shell theme for every window: porcelain, nightline or daylight.
+    std::string theme = "porcelain";
+    // DevTools open beside the page, as in Chrome, or in their own window.
+    bool devToolsDocked = true;
+    double devToolsWidth = 480;
 };
 
 // What closing a tab changed, so it can be undone. Kept only for this run of the app.

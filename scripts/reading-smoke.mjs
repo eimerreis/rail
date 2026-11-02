@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Reading list integration check: saving, the reader, pages it can't read, link rules, feeds, persistence, quitting.
-// Uses a disposable profile and a localhost fixture. EIMERRAIL_APP overrides the app to run.
+// Uses a disposable profile and a localhost fixture. RAIL_APP overrides the app to run.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const app = process.env.EIMERRAIL_APP || resolve(root, 'build/Release/Eimerrail.app/Contents/MacOS/Eimerrail');
+const app = process.env.RAIL_APP || resolve(root, 'build/Release/Rail.app/Contents/MacOS/Rail');
 await mkdir(resolve(root, '.runtime-test'), { recursive: true });
 const profile = await mkdtemp(resolve(root, '.runtime-test/reading-'));
 

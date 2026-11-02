@@ -209,6 +209,92 @@ std::string githubRunResult(const std::string& status, const std::string& conclu
     return "unknown";
 }
 
+std::string githubCheckState(const std::string& status, const std::string& conclusion) {
+    if (status == "in_progress") return "running";
+    if (status != "completed") return "pending";
+    if (conclusion == "skipped" || conclusion == "neutral") return "skipped";
+    const auto run = githubRunResult(status, conclusion);
+    return run == "canceled" || run == "unknown" ? "failed" : run == "queued" ? "pending" : run;
+}
+
+std::string azurePolicyState(const std::string& status) {
+    if (status == "approved") return "succeeded";
+    if (status == "rejected" || status == "broken") return "failed";
+    if (status == "running") return "running";
+    if (status == "notApplicable") return "skipped";
+    return "pending";
+}
+
+std::string azureVote(int vote) {
+    if (vote >= 5) return "approved";
+    if (vote == -5) return "waiting";
+    if (vote <= -10) return "rejected";
+    return "none";
+}
+
+std::string pullRequestChecks(const PullRequest& pr) {
+    bool any = false, running = false, pending = false;
+    for (const auto& check : pr.checks) {
+        if (check.kind != "build" || !check.blocking) continue;
+        any = true;
+        if (check.state == "failed") return "failed";
+        running = running || check.state == "running";
+        pending = pending || check.state == "pending";
+    }
+    return !any ? "none" : running ? "running" : pending ? "pending" : "succeeded";
+}
+
+namespace {
+bool hasPolicies(const PullRequest& pr) {
+    return std::any_of(pr.checks.begin(), pr.checks.end(), [](const PullRequestCheck& c) { return c.kind == "policy"; });
+}
+const PullRequestCheck* failedCheck(const PullRequest& pr) {
+    for (const auto& check : pr.checks) if (check.blocking && check.state == "failed" && check.kind == "build") return &check;
+    for (const auto& check : pr.checks) if (check.blocking && check.state == "failed") return &check;
+    return nullptr;
+}
+const PullRequestReviewer* blockingReviewer(const PullRequest& pr) {
+    for (const auto& reviewer : pr.reviewers) if (reviewer.vote == "rejected" || reviewer.vote == "waiting") return &reviewer;
+    return nullptr;
+}
+bool allBlockingPass(const PullRequest& pr) {
+    return std::all_of(pr.checks.begin(), pr.checks.end(), [](const PullRequestCheck& c) {
+        return !c.blocking || c.state == "succeeded" || c.state == "skipped";
+    });
+}
+bool approved(const PullRequest& pr) {
+    if (hasPolicies(pr)) return true; // the reviewer policies already decide
+    return std::any_of(pr.reviewers.begin(), pr.reviewers.end(), [](const PullRequestReviewer& r) { return r.vote == "approved"; });
+}
+} // namespace
+
+PullRequestStage pullRequestStage(const PullRequest& pr) {
+    if (pr.conflicts || failedCheck(pr) || blockingReviewer(pr) || pr.openThreads > 0) return PullRequestStage::needsYou;
+    if (!pr.draft && allBlockingPass(pr) && approved(pr)) return PullRequestStage::ready;
+    return PullRequestStage::waiting;
+}
+
+std::string pullRequestReason(const PullRequest& pr) {
+    if (pr.conflicts) return "Merge conflicts";
+    if (const auto* check = failedCheck(pr)) return check->name + " failed";
+    if (const auto* reviewer = blockingReviewer(pr))
+        return reviewer->name + (reviewer->vote == "waiting" ? " is waiting for you" : hasPolicies(pr) ? " rejected" : " requested changes");
+    if (pr.openThreads > 0) return std::to_string(pr.openThreads) + (pr.openThreads == 1 ? " open thread" : " open threads");
+    if (pr.draft) return "Draft";
+    const auto checks = pullRequestChecks(pr);
+    if (checks == "running") return "Checks running";
+    if (checks == "pending") return "Checks pending";
+    if (pullRequestStage(pr) == PullRequestStage::ready) return "Ready to merge";
+    const auto required = std::count_if(pr.reviewers.begin(), pr.reviewers.end(), [](const PullRequestReviewer& r) { return r.required; });
+    const auto counted = required ? required : static_cast<long>(pr.reviewers.size());
+    const auto approvals = std::count_if(pr.reviewers.begin(), pr.reviewers.end(), [&](const PullRequestReviewer& r) { return r.vote == "approved" && (r.required || !required); });
+    if (counted > 0 && approvals < counted) return std::to_string(approvals) + " of " + std::to_string(counted) + " approved";
+    if (!allBlockingPass(pr)) {
+        for (const auto& check : pr.checks) if (check.blocking && check.state != "succeeded" && check.state != "skipped") return check.name;
+    }
+    return "Needs review";
+}
+
 Access azureAccess(int status, const std::string& location, const std::string& mime, const std::string& displayName) {
     const auto where = lower(location);
     if (status == 401 || status == 403 || status == 203) return Access::signedOut;
@@ -256,7 +342,7 @@ std::vector<Attention> attentionFor(const Project& project, const ProjectsState&
         if (found == status.sources.end()) continue;
         const auto& source = found->second;
         if (source.notCovered) {
-            out.push_back({Tone::warn, "Eimerrail can't see " + binding.resource, "Add the repository to the GitHub App installation", "openInstallations", owner->id});
+            out.push_back({Tone::warn, "Rail can't see " + binding.resource, "Add the repository to the GitHub App installation", "openInstallations", owner->id});
             continue;
         }
         // runs holds the latest run of each pipeline on the default branch.

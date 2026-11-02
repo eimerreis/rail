@@ -32,7 +32,7 @@ printf '%s\\n' "$@" >> "$TEST_ROOT/opened"
 if [[ "$1" == -n && "${TEST_FAILURE:-}" == launch && "$(cat "$2/version")" == new ]]; then exit 1; fi
 ''')
         self.tool("mv", '''
-if [[ "${TEST_FAILURE:-}" == replace && "$1" == */Eimerrail.app ]]; then exit 1; fi
+if [[ "${TEST_FAILURE:-}" == replace && "$1" == */Rail.app ]]; then exit 1; fi
 /bin/mv "$@"
 ''')
         self.repo = self.root / "remote"
@@ -43,8 +43,8 @@ if [[ "${TEST_FAILURE:-}" == replace && "$1" == */Eimerrail.app ]]; then exit 1;
 set -eu
 [[ "${TEST_FAILURE:-}" != build ]] || exit 1
 printf '%s\\n' "$@" > "$TEST_ROOT/build-arguments"
-mkdir -p "$(dirname "$0")/../build/Release/Eimerrail.app"
-echo -n new > "$(dirname "$0")/../build/Release/Eimerrail.app/version"
+mkdir -p "$(dirname "$0")/../build/Release/Rail.app"
+echo -n new > "$(dirname "$0")/../build/Release/Rail.app/version"
 ''')
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "Fixture")
@@ -101,7 +101,7 @@ echo -n new > "$(dirname "$0")/../build/Release/Eimerrail.app/version"
     def assert_clean(self):
         self.assertFalse((self.cache / "lock").exists())
         self.assertFalse((self.run / "ready").exists())
-        self.assertEqual(list(self.root.glob(".eimerrail-update.*")), [])
+        self.assertEqual(list(self.root.glob(".rail-update.*")), [])
 
     def test_waits_for_exit_then_installs_and_preserves_arguments(self):
         worker = self.start()
@@ -112,7 +112,7 @@ echo -n new > "$(dirname "$0")/../build/Release/Eimerrail.app/version"
         self.assertEqual(worker.wait(timeout=10), 0)
         self.assertEqual(self.version(), "new")
         self.assertEqual((self.root / "build-arguments").read_text().splitlines(), [
-            "-DEIMERRAIL_SIGN_IDENTITY=signing identity & spaces", "-DEIMERRAIL_GITHUB_CLIENT_ID=client-id"])
+            "-DRAIL_SIGN_IDENTITY=signing identity & spaces", "-DRAIL_GITHUB_CLIENT_ID=client-id"])
         self.assertEqual((self.root / "opened").read_text().splitlines(), [
             "-n", str(self.app), "--args", "--data-dir=/profile with spaces", "--literal=$(touch nope)"])
         self.assert_clean()

@@ -29,7 +29,7 @@ def verified(path):
 
 
 def main():
-    stamp = DESTINATION / ".eimerrail-cef.json"
+    stamp = DESTINATION / ".rail-cef.json"
     required = ["include/cef_version.h", "cmake/FindCEF.cmake",
                 "Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"]
     if (stamp.exists() and json.loads(stamp.read_text()) == LOCK
@@ -86,7 +86,7 @@ def main():
         extracted = staging_path / LOCK["archive"].removesuffix(".tar.bz2")
         if not extracted.is_dir():
             raise RuntimeError("CEF archive has an unexpected top-level directory")
-        (extracted / ".eimerrail-cef.json").write_text(json.dumps(LOCK, indent=2) + "\n")
+        (extracted / ".rail-cef.json").write_text(json.dumps(LOCK, indent=2) + "\n")
         if DESTINATION.exists():
             shutil.rmtree(DESTINATION)
         extracted.rename(DESTINATION)

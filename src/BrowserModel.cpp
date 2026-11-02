@@ -437,6 +437,9 @@ void BrowserModel::sanitize(double now) {
     if (!std::isfinite(state.idleMinutes * 60) || state.idleMinutes <= 0) state.idleMinutes = 10;
     state.sidebarWidth = std::isfinite(state.sidebarWidth) ? std::clamp(state.sidebarWidth, 180.0, 420.0) : 210;
     if (state.controlSize != "normal" && state.controlSize != "large") state.controlSize = "small";
+    if (state.sidebarAnimation != "off" && state.sidebarAnimation != "subtle") state.sidebarAnimation = "full";
+    if (state.theme != "nightline" && state.theme != "daylight") state.theme = "porcelain";
+    state.devToolsWidth = std::isfinite(state.devToolsWidth) ? std::clamp(state.devToolsWidth, 240.0, 1600.0) : 480;
 
     if (state.sessions.empty()) state.sessions = {{"work", "Work"}, {"personal", "Personal"}};
     const auto sessionIDs = repairIDs(state.sessions, "session", true);

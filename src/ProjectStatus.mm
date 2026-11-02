@@ -2,6 +2,8 @@
 #import "Keychain.h"
 #import <Network/Network.h>
 #include "include/cef_urlrequest.h"
+#include <algorithm>
+#include <map>
 #include <set>
 
 namespace {
@@ -113,7 +115,7 @@ NSString *ShortError(NSError *error) {
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.HTTPCookieStorage = nil; config.HTTPShouldSetCookies = NO; config.URLCredentialStorage = nil; config.URLCache = nil;
     config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData; config.timeoutIntervalForRequest = 10;
-    config.HTTPAdditionalHeaders = @{@"User-Agent":@"Eimerrail"};
+    config.HTTPAdditionalHeaders = @{@"User-Agent":@"Rail"};
     _session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
     _healthTasks = [NSMutableSet set];
   }
@@ -124,7 +126,7 @@ NSString *ShortError(NSError *error) {
 - (NSString *)gitHubClientID {
   NSString *configured = [NSUserDefaults.standardUserDefaults stringForKey:@"GitHubClientID"];
   if (configured.length) return configured;
-  NSString *bundled = [NSBundle.mainBundle objectForInfoDictionaryKey:@"EimerrailGitHubClientID"];
+  NSString *bundled = [NSBundle.mainBundle objectForInfoDictionaryKey:@"RailGitHubClientID"];
   return [bundled isKindOfClass:NSString.class] && bundled.length && ![bundled hasPrefix:@"$"] ? bundled : nil;
 }
 - (void)changed { if (self.onChange) self.onChange(); }
@@ -245,13 +247,13 @@ NSString *ShortError(NSError *error) {
     NSDictionary *user = Dict(Dict(JSON(body))[@"authenticatedUser"]);
     rail::Access access = rail::azureAccess(status, C(location), C(mime), C(Str(user[@"providerDisplayName"])));
     auto &state = strong->_snapshot.connections[connection.id];
-    state.access = access; state.account = C(Str(Dict(Dict(user[@"properties"])[@"Account"])[@"$value"]));
+    state.access = access; state.account = C(Str(Dict(Dict(user[@"properties"])[@"Account"])[@"$value"])); state.userID = C(Str(user[@"id"]));
     state.error = access == rail::Access::unknown ? (status ? C([NSString stringWithFormat:@"Azure DevOps answered HTTP %d", status]) : "Azure DevOps did not answer") : "";
-    if (access == rail::Access::signedIn) for (const auto &binding : bindings) [strong fetchAzureSource:binding context:context];
+    if (access == rail::Access::signedIn) for (const auto &binding : bindings) [strong fetchAzureSource:binding context:context user:Str(user[@"id"])];
     [strong changed];
   });
 }
-- (void)fetchAzureSource:(rail::SourceBinding)binding context:(CefRefPtr<CefRequestContext>)context {
+- (void)fetchAzureSource:(rail::SourceBinding)binding context:(CefRefPtr<CefRequestContext>)context user:(NSString *)userID {
   NSArray *parts = [S(binding.resource) componentsSeparatedByString:@"/"];
   if (parts.count != 3) return;
   std::string key = rail::sourceKey(binding);
@@ -267,7 +269,7 @@ NSString *ShortError(NSError *error) {
     (void)location; (void)mime;
     NSDictionary *repo = Dict(JSON(body));
     if (status != 200 || !Str(repo[@"id"]).length) { fail(status == 404 ? @"Repository not found" : [NSString stringWithFormat:@"Couldn't read the repository (HTTP %d)", status]); return; }
-    NSString *repoID = Str(repo[@"id"]), *branch = Str(repo[@"defaultBranch"]);
+    NSString *repoID = Str(repo[@"id"]), *branch = Str(repo[@"defaultBranch"]), *projectID = Str(Dict(repo[@"project"])[@"id"]);
     NSString *project = [NSString stringWithFormat:@"https://dev.azure.com/%@/%@/_apis", parts[0], parts[1]];
     __block int pending = 2; __block rail::SourceStatus result;
     result.defaultBranch = C([branch stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
@@ -295,7 +297,65 @@ NSString *ShortError(NSError *error) {
     });
     SessionGET(context, Query([base stringByAppendingString:@"/pullrequests"], @{@"searchCriteria.status":@"active",@"$top":@"100",@"api-version":@"7.1"}), ^(int prStatus, NSString *l, NSString *m, NSData *prs) {
       (void)l; (void)m;
-      if (prStatus == 200) result.openPullRequests = (int)List(Dict(JSON(prs))[@"value"]).count;
+      NSArray *open = List(Dict(JSON(prs))[@"value"]);
+      if (prStatus == 200) { result.openPullRequests = (int)open.count; result.myPullRequestsKnown = userID.length > 0; }
+      // The user's own pull requests, each with its policy evaluations and comment threads.
+      NSString *web = [NSString stringWithFormat:@"https://dev.azure.com/%@/%@", parts[0], parts[1]];
+      for (id item in open) {
+        NSDictionary *pr = Dict(item);
+        if (!pr || !userID.length || [Str(Dict(pr[@"createdBy"])[@"id"]) caseInsensitiveCompare:userID] != NSOrderedSame) continue;
+        rail::PullRequest mine; NSString *number = Str(pr[@"pullRequestId"]);
+        mine.id = C(number); mine.title = C(Str(pr[@"title"]));
+        mine.url = C([NSString stringWithFormat:@"%@/_git/%@/pullrequest/%@", web, parts[2], number]);
+        mine.sourceBranch = C([Str(pr[@"sourceRefName"]) stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
+        mine.targetBranch = C([Str(pr[@"targetRefName"]) stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
+        mine.draft = [pr[@"isDraft"] boolValue]; mine.conflicts = [Str(pr[@"mergeStatus"]) isEqualToString:@"conflicts"];
+        mine.autoComplete = Dict(pr[@"autoCompleteSetBy"]) != nil; mine.createdAt = ISODate(Str(pr[@"creationDate"]));
+        for (id r in List(pr[@"reviewers"])) {
+          NSDictionary *reviewer = Dict(r);
+          if (!reviewer || [Str(reviewer[@"id"]) caseInsensitiveCompare:userID] == NSOrderedSame) continue;
+          mine.reviewers.push_back({C(Str(reviewer[@"displayName"])), rail::azureVote([reviewer[@"vote"] intValue]), [reviewer[@"isRequired"] boolValue]});
+        }
+        result.myPullRequests.push_back(mine);
+      }
+      pending += (int)result.myPullRequests.size() * 2;
+      for (size_t i = 0; i < result.myPullRequests.size(); i++) {
+        NSString *number = S(result.myPullRequests[i].id);
+        NSString *artifact = [NSString stringWithFormat:@"vstfs:///CodeReview/CodeReviewId/%@/%@", projectID, number];
+        SessionGET(context, Query([project stringByAppendingString:@"/policy/evaluations"], @{@"artifactId":artifact,@"api-version":@"7.1-preview.1"}), ^(int status, NSString *l2, NSString *m2, NSData *body) {
+          (void)l2; (void)m2;
+          if (status == 200) for (id e in List(Dict(JSON(body))[@"value"])) {
+            NSDictionary *evaluation = Dict(e), *configuration = Dict(evaluation[@"configuration"]), *context = Dict(evaluation[@"context"]);
+            if (!evaluation || (configuration[@"isEnabled"] && ![configuration[@"isEnabled"] boolValue])) continue;
+            NSString *type = Str(Dict(configuration[@"type"])[@"displayName"]), *name = Str(Dict(configuration[@"settings"])[@"displayName"]);
+            if (!name.length) name = Str(context[@"buildDefinitionName"]);
+            if (!name.length) name = type;
+            BOOL build = [type isEqualToString:@"Build"] || [type isEqualToString:@"Status"];
+            rail::PullRequestCheck check; check.kind = build ? "build" : "policy"; check.name = C(name);
+            check.state = rail::azurePolicyState(C(Str(evaluation[@"status"])));
+            check.blocking = !configuration[@"isBlocking"] || [configuration[@"isBlocking"] boolValue];
+            if ([context[@"isExpired"] boolValue]) { check.state = "pending"; check.detail = "Expired"; }
+            if (Str(context[@"buildId"]).length) check.url = C([NSString stringWithFormat:@"%@/_build/results?buildId=%@", web, Str(context[@"buildId"])]);
+            if (!build) check.detail = check.state == "succeeded" ? "" : C(type);
+            result.myPullRequests[i].checks.push_back(check);
+          }
+          complete();
+        });
+        SessionGET(context, Query([base stringByAppendingFormat:@"/pullRequests/%@/threads", number], @{@"api-version":@"7.1"}), ^(int status, NSString *l2, NSString *m2, NSData *body) {
+          (void)l2; (void)m2;
+          if (status == 200) {
+            int active = 0;
+            for (id t in List(Dict(JSON(body))[@"value"])) {
+              NSDictionary *thread = Dict(t); NSDictionary *first = Dict(List(thread[@"comments"]).firstObject);
+              if (!thread || [thread[@"isDeleted"] boolValue] || !first || [Str(first[@"commentType"]) isEqualToString:@"system"]) continue;
+              NSString *state = Str(thread[@"status"]);
+              if ([state isEqualToString:@"active"] || [state isEqualToString:@"pending"]) active++;
+            }
+            result.myPullRequests[i].openThreads = active;
+          }
+          complete();
+        });
+      }
       complete();
     });
   });
@@ -378,11 +438,11 @@ NSString *ShortError(NSError *error) {
     strong->_inFlight.erase(key);
     auto &state = strong->_snapshot.connections[connection.id];
     state.access = access; state.account = connection.account; state.error.clear();
-    if (token) for (const auto &binding : bindings) [strong fetchGitHubSource:binding token:token connection:connection.id];
+    if (token) for (const auto &binding : bindings) [strong fetchGitHubSource:binding token:token connection:connection.id account:S(connection.account)];
     [strong changed];
   }];
 }
-- (void)fetchGitHubSource:(rail::SourceBinding)binding token:(NSString *)token connection:(std::string)connectionID {
+- (void)fetchGitHubSource:(rail::SourceBinding)binding token:(NSString *)token connection:(std::string)connectionID account:(NSString *)login {
   std::string key = rail::sourceKey(binding);
   NSArray *parts = [S(binding.resource) componentsSeparatedByString:@"/"];
   if (parts.count != 2) return;
@@ -417,14 +477,60 @@ NSString *ShortError(NSError *error) {
       complete();
     }];
     [strong gitHubGET:[repoPath stringByAppendingString:@"/pulls?state=open&per_page=100"] token:token done:^(id prs, NSInteger prStatus) {
-      if (prStatus == 200) result.openPullRequests = (int)List(prs).count;
+      if (prStatus == 200) { result.openPullRequests = (int)List(prs).count; result.myPullRequestsKnown = login.length > 0; }
+      // The user's own pull requests, each with its check runs, reviews and mergeability.
+      for (id item in List(prs)) {
+        NSDictionary *pr = Dict(item);
+        if (!pr || !login.length || [Str(Dict(pr[@"user"])[@"login"]) caseInsensitiveCompare:login] != NSOrderedSame) continue;
+        rail::PullRequest mine; mine.id = C(Str(pr[@"number"])); mine.title = C(Str(pr[@"title"])); mine.url = C(Str(pr[@"html_url"]));
+        mine.sourceBranch = C(Str(Dict(pr[@"head"])[@"ref"])); mine.targetBranch = C(Str(Dict(pr[@"base"])[@"ref"]));
+        mine.draft = [pr[@"draft"] boolValue]; mine.autoComplete = Dict(pr[@"auto_merge"]) != nil; mine.createdAt = ISODate(Str(pr[@"created_at"]));
+        for (id r in List(pr[@"requested_reviewers"])) mine.reviewers.push_back({C(Str(Dict(r)[@"login"])), "none", false});
+        mine.detailsSHA = C(Str(Dict(pr[@"head"])[@"sha"]));
+        result.myPullRequests.push_back(mine);
+      }
+      pending += (int)result.myPullRequests.size() * 3;
+      for (size_t i = 0; i < result.myPullRequests.size(); i++) {
+        NSString *number = S(result.myPullRequests[i].id), *sha = S(result.myPullRequests[i].detailsSHA);
+        [strong gitHubGET:[NSString stringWithFormat:@"%@/commits/%@/check-runs?per_page=100", repoPath, sha] token:token done:^(id body, NSInteger status) {
+          std::set<std::string> seen;
+          if (status == 200) for (id c in List(Dict(body)[@"check_runs"])) {
+            NSDictionary *run = Dict(c); if (!run || !seen.insert(C(Str(run[@"name"]))).second) continue;
+            rail::PullRequestCheck check; check.kind = "build"; check.name = C(Str(run[@"name"])); check.url = C(Str(run[@"html_url"]));
+            check.state = rail::githubCheckState(C(Str(run[@"status"])), C(Str(run[@"conclusion"])));
+            result.myPullRequests[i].checks.push_back(check);
+          }
+          complete();
+        }];
+        [strong gitHubGET:[NSString stringWithFormat:@"%@/pulls/%@/reviews?per_page=100", repoPath, number] token:token done:^(id body, NSInteger status) {
+          // The latest decisive review of each reviewer counts.
+          std::map<std::string, std::string> votes;
+          if (status == 200) for (id r in List(body)) {
+            NSDictionary *review = Dict(r); NSString *state = Str(review[@"state"]); std::string who = C(Str(Dict(review[@"user"])[@"login"]));
+            if (who.empty() || [Str(Dict(review[@"user"])[@"login"]) caseInsensitiveCompare:login] == NSOrderedSame) continue;
+            if ([state isEqualToString:@"APPROVED"]) votes[who] = "approved";
+            else if ([state isEqualToString:@"CHANGES_REQUESTED"]) votes[who] = "rejected";
+            else if ([state isEqualToString:@"DISMISSED"]) votes[who] = "none";
+          }
+          auto &reviewers = result.myPullRequests[i].reviewers;
+          for (const auto &[who, vote] : votes) {
+            auto found = std::find_if(reviewers.begin(), reviewers.end(), [&](const rail::PullRequestReviewer &r) { return r.name == who; });
+            if (found != reviewers.end()) found->vote = vote; else reviewers.push_back({who, vote, false});
+          }
+          complete();
+        }];
+        [strong gitHubGET:[NSString stringWithFormat:@"%@/pulls/%@", repoPath, number] token:token done:^(id body, NSInteger status) {
+          if (status == 200) result.myPullRequests[i].conflicts = [Str(Dict(body)[@"mergeable_state"]) isEqualToString:@"dirty"];
+          complete();
+        }];
+      }
       complete();
     }];
   }];
 }
 - (void)signInToGitHub:(NSString *)connectionID code:(void (^)(NSString *, NSString *))code done:(void (^)(NSString *, NSString *))done {
   NSString *client = self.gitHubClientID;
-  if (!client.length) { done(nil, @"GitHub sign-in isn't set up yet. Register the Eimerrail GitHub App and set its client ID (see README)."); return; }
+  if (!client.length) { done(nil, @"GitHub sign-in isn't set up yet. Register the Rail GitHub App and set its client ID (see README)."); return; }
   NSUInteger flow = ++_deviceFlow; _deviceFlowCancelled = NO;
   __weak ProjectStatusService *weak = self;
   [self postForm:@"https://github.com/login/device/code" fields:@{@"client_id":client} done:^(NSDictionary *body, NSInteger status) {

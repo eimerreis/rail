@@ -70,7 +70,7 @@ Notes:
 - **Environment order** is the vector order and matches the card's button order. Local first, then remotes, is the default when they are created.
 - **Custom links** are any URL you want one click away from the card: LaunchDarkly, Grafana, Figma, a runbook. They have no status; they only open. See "Custom links".
 - **`sources` is a list** because one project can have a GitHub repo plus an Azure DevOps pipeline. The card's Pipelines status comes from all bindings that support pipelines.
-- **Tokens never appear in JSON.** For `deviceToken` and `token` connections the Keychain item has service `Eimerrail Connections`, account = connection ID. A `session` connection has no secret at all.
+- **Tokens never appear in JSON.** For `deviceToken` and `token` connections the Keychain item has service `Rail Connections`, account = connection ID. A `session` connection has no secret at all.
 
 ### Which login a project uses
 
@@ -171,7 +171,7 @@ The suggested name comes from the role picked. For a new environment it is the h
 
 Added from the card's "…" menu ("Add link…": label, URL, session, optional environment), or with "Attach a tab … as link". On the card, `repo` and `pipelines` links sit in the button stack with the environments. Custom links form a compact row of chips under the status area, each showing an icon and the label, plus a small environment tag when `environmentID` is set (e.g. "LaunchDarkly · PROD"). The first four are shown; the rest go into an overflow menu. Order is the vector order and can be changed by dragging.
 
-The icon is the tab's favicon when the link was attached from a tab, cached next to `projects.json`. Otherwise it is a generic link icon. Eimerrail fetches no favicons for this in v1.
+The icon is the tab's favicon when the link was attached from a tab, cached next to `projects.json`. Otherwise it is a generic link icon. Rail fetches no favicons for this in v1.
 
 ### 4. Import from a provider
 
@@ -235,17 +235,17 @@ A rejected token (401) marks the connection `rejected`, and it is not retried un
 
 ### Signing in to GitHub
 
-1. The app requests a device code from `https://github.com/login/device/code` with Eimerrail's client ID.
+1. The app requests a device code from `https://github.com/login/device/code` with Rail's client ID.
 2. It opens `https://github.com/login/device` as a tab in the project's session, shows the code on the card and copies it to the clipboard. The user is usually already logged in there, so they paste the code and click Authorize.
 3. The app polls `https://github.com/login/oauth/access_token` at the interval GitHub returns, stores the token in the Keychain, and reads the login from `GET /user` into `Connection.account`.
 
-Eimerrail is registered once as a **GitHub App** (decided 2026-10-29), with device flow enabled. The device flow needs only the client ID, no secret. Permissions are read-only: Metadata, Actions, Pull requests.
+Rail is registered once as a **GitHub App** (decided 2026-10-29), with device flow enabled. The device flow needs only the client ID, no secret. Permissions are read-only: Metadata, Actions, Pull requests.
 
 - **Installation:** install the app on the personal account and on each org with **All repositories**. New repos are then covered automatically; "Only select repositories" would need every new repo added by hand.
 - **What a token can see:** the intersection of the app's permissions, the repos the installation covers, and what the signed-in user can access.
 - **New permissions later** (e.g. Deployments or Checks for v2) need a one-time approval on each installation; GitHub asks the account or org owner.
 - **Token lifetime:** user tokens expire after 8 hours and come with a refresh token valid for 6 months. The app refreshes silently and stores the new pair in the Keychain. Only a refresh token unused for 6 months, or a revoked app, leads back to the sign-in on the card.
-- If a repo is not covered by any installation, its card shows "Eimerrail can't see this repo" with a link to the installation settings, not a generic sign-in.
+- If a repo is not covered by any installation, its card shows "Rail can't see this repo" with a link to the installation settings, not a generic sign-in.
 
 ## Opening an environment or link
 

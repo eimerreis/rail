@@ -1,14 +1,36 @@
 #import "CEFBridge.h"
 #include "include/cef_parser.h"
 #include "include/cef_context_menu_handler.h"
+#include "include/cef_find_handler.h"
 #include "include/wrapper/cef_helpers.h"
 
 namespace {
 NSString *S(const CefString &s) { return [NSString stringWithUTF8String:s.ToString().c_str()] ?: @""; }
 
-// DevTools owns its native window and must never send tab lifecycle callbacks.
-class DevToolsClient final : public CefClient {
+// DevTools never send tab lifecycle callbacks; they only tell the controller about their window.
+// Chromium always gives DevTools their own window: on macOS they can't be embedded in a view.
+// Docked, the controller attaches that window over the right side of the page.
+class DevToolsClient final : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler {
+ public:
+  DevToolsClient(BrowserController *controller, std::string tabID, uint64_t generation, bool docked)
+      : controller_(controller), tabID_(std::move(tabID)), generation_(generation), docked_(docked) {}
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+  void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    CEF_REQUIRE_UI_THREAD(); [controller_ devToolsCreated:browser tab:tabID_ generation:generation_];
+  }
+  void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+    CEF_REQUIRE_UI_THREAD(); [controller_ devToolsClosed:browser tab:tabID_ generation:generation_];
+  }
+  bool OnPreKeyEvent(CefRefPtr<CefBrowser>, const CefKeyEvent &event, CefEventHandle nativeEvent, bool *) override {
+    if (!docked_ || event.type != KEYEVENT_RAWKEYDOWN || !nativeEvent) return false;
+    return [controller_ handleDevToolsShortcut:(__bridge NSEvent *)nativeEvent];
+  }
  private:
+  __weak BrowserController *controller_;
+  std::string tabID_;
+  uint64_t generation_;
+  bool docked_;
   IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 constexpr int InspectElementCommand = MENU_ID_USER_FIRST;
@@ -26,7 +48,7 @@ class RailApp final : public CefApp, public CefBrowserProcessHandler {
 class RailClient final : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler,
   public CefLoadHandler, public CefRequestHandler, public CefKeyboardHandler,
   public CefPermissionHandler, public CefDownloadHandler, public CefJSDialogHandler,
-  public CefContextMenuHandler {
+  public CefContextMenuHandler, public CefFindHandler {
  public:
   RailClient(BrowserController *controller, std::string tabID, uint64_t generation)
       : controller_(controller), tabID_(std::move(tabID)), generation_(generation) {}
@@ -39,6 +61,19 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+  void OnFindResult(CefRefPtr<CefBrowser>, int identifier, int count, const CefRect &,
+      int ordinal, bool finalUpdate) override {
+    CEF_REQUIRE_UI_THREAD();
+    [controller_ findResult:identifier count:count ordinal:ordinal final:finalUpdate tab:tabID_ generation:generation_];
+  }
+
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+      CefProcessId source, CefRefPtr<CefProcessMessage> message) override {
+    CEF_REQUIRE_UI_THREAD();
+    if (source != PID_RENDERER || !frame->IsMain() || message->GetName() != "rail.credentials.reply") return false;
+    [controller_ passwordReply:message tab:tabID_ generation:generation_]; return true;
+  }
 
   void OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
       CefRefPtr<CefContextMenuParams>, CefRefPtr<CefMenuModel> menu) override {
@@ -50,7 +85,7 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       CefRefPtr<CefContextMenuParams> params, int commandID, EventFlags) override {
     CEF_REQUIRE_UI_THREAD();
     if (commandID != InspectElementCommand) return false;
-    ShowRailDevTools(browser, CefPoint(params->GetXCoord(), params->GetYCoord()));
+    [controller_ inspectTab:tabID_ generation:generation_ at:CefPoint(params->GetXCoord(), params->GetYCoord())];
     return true;
   }
 
@@ -63,12 +98,20 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   void OnBeforeClose(CefRefPtr<CefBrowser>) override {
     CEF_REQUIRE_UI_THREAD(); [controller_ browserClosed:tabID_ generation:generation_];
   }
-  bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int popupID, const CefString &url,
-      const CefString &, WindowOpenDisposition, bool gesture, const CefPopupFeatures &,
+  bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int popupID, const CefString &url,
+      const CefString &, WindowOpenDisposition disposition, bool gesture, const CefPopupFeatures &,
       CefWindowInfo &info, CefRefPtr<CefClient> &client, CefBrowserSettings &,
       CefRefPtr<CefDictionaryValue> &, bool *) override {
     CEF_REQUIRE_UI_THREAD();
-    if (!gesture || (!url.empty() && !RailNavigationAllowed(url))) return true;
+    if (!gesture) return true;
+    if (!url.empty() && !RailNavigationAllowed(url)) {
+      [controller_ requestExternalAppURL:S(url) fromPage:frame ? S(frame->GetURL()) : @"" tab:tabID_ generation:generation_];
+      return true;
+    }
+    if (disposition == CEF_WOD_NEW_BACKGROUND_TAB && !url.empty()) {
+      [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:YES];
+      return true;
+    }
     return ![controller_ preparePopupFrom:tabID_ generation:generation_ popupID:popupID url:S(url) windowInfo:info client:client];
   }
   void OnBeforePopupAborted(CefRefPtr<CefBrowser>, int popupID) override {
@@ -90,11 +133,32 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       const CefString &text, const CefString &) override {
     if (frame->IsMain() && code != ERR_ABORTED) [controller_ loadFailed:S(text) tab:tabID_ generation:generation_];
   }
-  bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
-    if (frame->IsMain() && !RailNavigationAllowed(request->GetURL())) {
-      [controller_ setStatus:@"This address type is not supported."]; return true;
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool gesture, bool) override {
+    CEF_REQUIRE_UI_THREAD();
+    if (frame->IsMain()) [controller_ passwordPageNavigating:tabID_ generation:generation_];
+    const CefString url = request->GetURL();
+    if (!RailNavigationAllowed(url) && (frame->IsMain() || RailIsExternalAppURL(url))) {
+      // Auth redirects often have no user gesture. The native prompt supplies
+      // consent for top-level navigation; hidden frames cannot initiate it.
+      if (frame->IsMain() || gesture)
+        [controller_ requestExternalAppURL:S(url) fromPage:S(frame->GetURL()) tab:tabID_ generation:generation_];
+      return true;
     }
     return false;
+  }
+  bool OnOpenURLFromTab(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, const CefString &url,
+      WindowOpenDisposition disposition, bool gesture) override {
+    CEF_REQUIRE_UI_THREAD();
+    if (RailNavigationAllowed(url)) {
+      if (disposition == CEF_WOD_NEW_BACKGROUND_TAB || disposition == CEF_WOD_NEW_FOREGROUND_TAB) {
+        [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:disposition == CEF_WOD_NEW_BACKGROUND_TAB];
+        return true;
+      }
+      return false;
+    }
+    if (gesture && frame)
+      [controller_ requestExternalAppURL:S(url) fromPage:S(frame->GetURL()) tab:tabID_ generation:generation_];
+    return true;
   }
   void OnRenderProcessTerminated(CefRefPtr<CefBrowser>, TerminationStatus, int, const CefString &) override {
     [controller_ loadFailed:@"The page stopped responding. Reload to try again." tab:tabID_ generation:generation_];
@@ -167,21 +231,32 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   IMPLEMENT_REFCOUNTING(RailClient);
 };
 }
-void ShowRailDevTools(CefRefPtr<CefBrowser> browser, const CefPoint &inspectAt) {
+void ShowRailDevTools(BrowserController *controller, CefRefPtr<CefBrowser> browser, const std::string &tabID, uint64_t generation,
+    bool docked, const CefPoint &inspectAt) {
   CEF_REQUIRE_UI_THREAD();
   if (!browser || !browser->IsValid()) return;
   CefWindowInfo info;
+  info.bounds=CefRect(0,0,1100,750); CefString(&info.window_name)="Rail DevTools";
   info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
-  info.bounds=CefRect(0,0,1100,750);
-  CefString(&info.window_name)="Eimerrail DevTools";
   CefBrowserSettings settings;
-  browser->GetHost()->ShowDevTools(info,new DevToolsClient,settings,inspectAt);
+  browser->GetHost()->ShowDevTools(info,new DevToolsClient(controller,tabID,generation,docked),settings,inspectAt);
 }
 bool RailNavigationAllowed(const CefString &url) {
   NSString *address = S(url);
   if ([address isEqualToString:@"about:blank"]) return true;
   NSString *scheme = [NSURLComponents componentsWithString:address].scheme.lowercaseString;
   return [scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"];
+}
+bool RailIsExternalAppURL(const CefString &url) {
+  NSURLComponents *parts = [NSURLComponents componentsWithString:S(url)];
+  NSString *scheme = parts.scheme.lowercaseString;
+  if (!scheme.length || !parts.URL) return false;
+  // Browser content and local files must never be handed to Launch Services,
+  // even if macOS happens to have an application registered for their scheme.
+  if ([@[@"http", @"https", @"file", @"about", @"data", @"blob", @"filesystem",
+         @"javascript", @"view-source", @"chrome", @"devtools", @"chrome-devtools",
+         @"ws", @"wss"] containsObject:scheme] || [scheme hasPrefix:@"chrome-"]) return false;
+  return true;
 }
 CefRefPtr<CefClient> MakeRailClient(BrowserController *controller, const std::string &tabID, uint64_t generation) {
   return new RailClient(controller,tabID,generation);

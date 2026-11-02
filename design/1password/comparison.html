@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rail — three ways to fill with 1Password</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:var(--font-sans,system-ui);color:var(--foreground,#292D29)}
+main{display:grid;gap:25px}section{min-width:0}header{display:flex;align-items:center;gap:12px;margin-bottom:8px}h2{font-size:16px;line-height:1.3;letter-spacing:-.2px;margin:0;font-weight:650}.recommendation{font-size:11px;color:var(--success,#356644);background:var(--success-surface,#E6EFE4);padding:3px 7px;border-radius:var(--radius,6px)}
+button{font:inherit;font-size:12px;background:var(--secondary,#F3F0E9);color:var(--foreground,#292D29);border:1px solid var(--border,#D6CFC2);border-radius:var(--radius,6px);padding:6px 9px;cursor:pointer;margin-left:auto;white-space:nowrap}button:hover{background:var(--accent,#DCE5D7)}button:focus-visible{outline:2px solid var(--ring,#526A54);outline-offset:2px}p{font-size:13px;line-height:1.5;color:var(--muted-foreground,#575B52);margin:0 0 10px}
+.frame{position:relative;overflow:hidden;border:1px solid var(--border,#D6CFC2);border-radius:var(--radius,8px);aspect-ratio:1440/900}.frame img{display:block;width:100%;height:auto}.frame.detail{max-width:620px;margin-inline:auto;aspect-ratio:var(--crop-w)/var(--crop-h)}.frame.detail img{position:absolute;max-width:none;width:calc(1440 / var(--crop-w) * 100%);left:calc(-1 * var(--crop-x) / var(--crop-w) * 100%);top:calc(-1 * var(--crop-y) / var(--crop-h) * 100%)}
+.note{font-size:12px;line-height:1.5;color:var(--muted-foreground,#575B52);margin:0}.keyboard{font-family:var(--font-mono,monospace);font-size:12px}a{color:var(--primary,#526A54);text-underline-offset:3px}::selection{background:var(--accent,#DCE5D7)}
+@media(max-width:480px){header{flex-wrap:wrap;gap:6px}h2{font-size:14px}.recommendation{font-size:10px}button{font-size:11px}p{font-size:12px}main{gap:21px}}
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <header><h2>A · Toolbar popover</h2><span class="recommendation">Recommended first</span><button type="button" aria-pressed="false" data-target="a">Inspect picker</button></header>
+    <p>A predictable home in the toolbar. Choose a matching login, then fill.</p>
+    <div class="frame" id="a" style="--crop-x:937;--crop-y:49;--crop-w:405;--crop-h:455"><img src="a-toolbar-popover.png" alt="A: Native 1Password popover anchored to Rail's toolbar, showing two matching example logins and a Fill login button."></div>
+  </section>
+  <section>
+    <header><h2>B · Inline suggestion</h2><button type="button" aria-pressed="false" data-target="b">Inspect picker</button></header>
+    <p>Right beside the field. Fastest to use; more work to handle page layouts reliably.</p>
+    <div class="frame" id="b" style="--crop-x:664;--crop-y:300;--crop-w:385;--crop-h:380"><img src="b-inline-suggestion.png" alt="B: A 1Password key in the email field opens a native suggestion panel immediately below, with two example login choices."></div>
+  </section>
+  <section>
+    <header><h2>C · Command palette</h2><button type="button" aria-pressed="false" data-target="c">Inspect picker</button></header>
+    <p>A roomy picker for keyboard use. Search, choose with arrow keys, and press Return.</p>
+    <div class="frame" id="c" style="--crop-x:568;--crop-y:201;--crop-w:580;--crop-h:425"><img src="c-keyboard-picker.png" alt="C: A browser-owned command palette over the page, with a focused search field, two matching example logins, and keyboard hints."></div>
+  </section>
+  <p class="note">Design mockups with example logins. All three use Rail’s Porcelain theme and the official SDK direction. Authorization takes place in the real 1Password app; no vault data is shown here.</p>
+</main>
+<script>
+document.querySelectorAll('button[data-target]').forEach(button=>button.addEventListener('click',()=>{
+ const frame=document.getElementById(button.dataset.target),detail=frame.classList.toggle('detail');
+ button.textContent=detail?'Show full window':'Inspect picker';
+ button.setAttribute('aria-pressed',String(detail));
+}));
+</script>
+</body>
+</html>

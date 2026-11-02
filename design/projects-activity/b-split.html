@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Projects &amp; Activity · B · Split view</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<link rel="stylesheet" href="views.css">
+<style>
+/* B · Split view: a Mail-style list on the left, the selected item's full state on the right. */
+.page{display:flex}
+.view{flex:1;flex-direction:row!important;min-width:0}
+.listp{width:372px;flex-shrink:0;border-right:1px solid var(--line);background:#fafbfc;display:flex;flex-direction:column}
+.lhead{padding:20px 18px 12px;display:grid;gap:12px}
+.lhead .top{display:flex;align-items:baseline;justify-content:space-between}
+.lhead h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.3px}
+.lhead .top span{font-size:10.5px;color:var(--sub)}
+.lhead .search{width:auto;background:#fff}
+.lhead .seg{justify-self:start}
+.lgrp{padding:12px 18px 5px;font-size:10px;font-weight:600;color:var(--sub);display:flex;gap:7px}
+.lgrp span{font-weight:500}
+.items{padding:0 8px;display:grid;gap:2px}
+.it{display:grid;grid-template-columns:20px minmax(0,1fr) auto;column-gap:10px;row-gap:3px;padding:10px 10px 10px 10px;border-radius:8px;align-items:center;text-align:left;width:100%}
+.it:hover{background:var(--row-hover)}
+.it.sel{background:var(--selected)}
+.it.sel b{color:var(--accent)}
+.it .fav{width:18px;height:18px;border-radius:5px}
+.it .ck{justify-self:center}
+.it b{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.it .tm{font-size:10px;color:var(--sub);font-variant-numeric:tabular-nums}
+.it .l2{grid-column:2/-1;font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.it .l3{grid-column:2/-1;display:flex;gap:11px;font-size:10px;color:var(--sub);margin-top:2px}
+.it .l3 span{display:inline-flex;align-items:center;gap:5px}
+.it .l3 .dot{width:7px;height:7px}
+.it.sel .l2,.it.sel .l3,.it.sel .tm{color:#3f5f84}
+
+.det{flex:1;min-width:0;padding:24px 34px;overflow:hidden}
+.dh{display:flex;align-items:flex-start;gap:12px}
+.dh .fav{width:26px;height:26px;border-radius:7px;margin-top:2px}
+.dh .fav svg{width:15px;height:15px}
+.dh h2{margin:0;font-size:19px;font-weight:650;letter-spacing:-.3px}
+.dh p{margin:4px 0 0;font-size:11px;color:var(--sub);display:flex;gap:8px;align-items:center}
+.dh .acts{margin-left:auto;display:flex;gap:8px}
+.alert{margin-top:20px;border:1px solid #ecc4bc;border-radius:10px;padding:14px 16px;background:#fff;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;box-shadow:0 6px 18px -12px rgba(176,58,44,.3)}
+.alert .pills{display:flex;gap:6px;flex-wrap:wrap}
+.alert .why{margin:10px 0 12px;font-size:11.5px;line-height:1.55;color:var(--sub)}
+.alert .why b{color:var(--ink);font-weight:600}
+.chart .cap{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--sub);margin-bottom:4px}
+.chart .cap b{font-size:13px;color:var(--crit);font-weight:650}
+.chart svg{display:block;width:100%;height:74px;overflow:visible}
+.chart .x{display:flex;justify-content:space-between;font-size:9.5px;color:var(--sub);margin-top:4px}
+h3{margin:24px 0 8px;font-size:11px;font-weight:650;display:flex;align-items:center;gap:8px}
+h3 span{font-weight:400;color:var(--sub)}
+.inset{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.er{display:grid;grid-template-columns:18px 86px minmax(0,1fr) auto 24px;align-items:center;column-gap:10px;height:40px;padding:0 10px 0 14px;font-size:11.5px}
+.er + .er{border-top:1px solid var(--line-soft)}
+.er:hover{background:var(--row-hover)}
+.er > svg{width:14px;height:14px;color:var(--sub)}
+.er .lbl{font-weight:600}
+.er .val{display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;color:var(--ink)}
+.er .val .sub{overflow:hidden;text-overflow:ellipsis}
+.er .go{color:var(--sub);display:grid;place-items:center}
+.er .go svg{width:13px;height:13px}
+.er .host{font-family:var(--mono);font-size:10.5px;color:var(--sub)}
+.prl{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;font-size:11.5px}
+.prl b{font-weight:600}
+.prl .r{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px}
+
+/* Activity detail */
+.state{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.cl .cr{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;align-items:center;column-gap:10px;min-height:40px;padding:0 14px;font-size:11.5px}
+.cl .cr + .cr{border-top:1px solid var(--line-soft)}
+.cl .cr b{font-weight:600}
+.cl .cr .m{color:var(--sub);font-size:10.5px;font-variant-numeric:tabular-nums}
+.cl .cr .go{color:var(--sub)}
+.cl .cr .go svg{width:13px;height:13px}
+.cl .sub-tests{grid-column:2/-1;margin:0 0 11px;padding:9px 11px;border-radius:7px;background:#fbf5f4;box-shadow:inset 0 0 0 1px #f0d6d0;display:grid;gap:5px;font-size:10.5px}
+.cl .sub-tests div{display:flex;gap:8px;align-items:center}
+.cl .sub-tests .ck{width:12px;height:12px}.cl .sub-tests .ck svg{width:7px;height:7px}
+.cl .cr.open{padding-top:4px}
+.rvr{display:flex;align-items:center;gap:6px}
+</style>
+</head>
+<body data-view="projects">
+<script src="../project-overview/icons.js"></script>
+<script src="icons-extra.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn current" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn" aria-label="Settings"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn" aria-label="Hide sidebar"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="space-head">Work<button class="icon-btn" aria-label="Space options"><svg class="i"><use href="#dots"/></svg></button></div>
+    <div class="space-desc">A little room for good work.</div>
+    <div class="side-scroll">
+      <div class="navrows">
+        <button class="navrow" data-to="projects"><svg class="i"><use href="#grid"/></svg><span class="t">Projects</span><span class="nb crit">2</span></button>
+        <button class="navrow" data-to="activity"><svg class="i"><use href="#activity"/></svg><span class="t">Activity</span><span class="nb crit">2</span></button>
+      </div>
+      <div class="sec">Pinned</div>
+      <div class="pins">
+        <div class="pin"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>DevOps</div>
+        <div class="pin"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>GitHub</div>
+        <div class="pin"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span>Insights</div>
+        <div class="pin"><span class="fav"><svg class="i"><use href="#calendar"/></svg></span>Calendar</div>
+      </div>
+      <div class="sec">Tabs</div>
+      <div class="rows">
+        <div class="row"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">PR 1187 · Handle transferred seats</span><span class="mk">W</span></div>
+        <div class="row"><span class="fav ai"><svg class="i"><use href="#insights"/></svg></span><span class="t">Failures · billing-prod</span><span class="mk i">I</span></div>
+        <div class="row"><span class="fav local"><svg class="i"><use href="#laptop"/></svg></span><span class="t">localhost:3000</span><span class="mk">W</span></div>
+        <div class="row asleep"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Sprint 41 board</span><span class="moon"><svg class="i"><use href="#moon"/></svg></span></div>
+      </div>
+      <div class="new-tab"><svg class="i"><use href="#plus"/></svg>New tab</div>
+    </div>
+    <div class="side-foot">1 asleep · after 10 min</div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn dim" aria-label="Back"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim" aria-label="Forward"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn" aria-label="Reload"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#grid"/></svg><b>Work · Projects</b></div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <!-- ───────────── Projects ───────────── -->
+      <section class="view projects">
+        <div class="listp">
+          <div class="lhead">
+            <div class="top"><h1>Projects</h1><span class="num">Checked 09:59</span></div>
+            <div class="search"><svg class="i"><use href="#search"/></svg>Filter projects<kbd>⌘F</kbd></div>
+          </div>
+          <div class="lgrp">Needs attention <span>2</span></div>
+          <div class="items">
+            <button class="it sel"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><b>Billing API</b><span class="tm">14:14</span>
+              <span class="l2"><span class="crit-t">Failed requests 4.2% on PROD</span></span>
+              <span class="l3"><span><span class="dot ok"></span>CI</span><span><span class="dot run"></span>Local</span><span><span class="dot ok"></span>INT</span><span><span class="dot crit"></span>PROD</span></span></button>
+            <button class="it"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><b>License Service</b><span class="tm">09:33</span>
+              <span class="l2"><span class="crit-t">INT deploy failed</span> · 3 integration tests</span>
+              <span class="l3"><span><span class="dot crit"></span>CI</span><span><span class="dot off"></span>Local</span><span><span class="dot ok"></span>INT</span><span><span class="dot ok"></span>PROD</span></span></button>
+          </div>
+          <div class="lgrp">In progress <span>2</span></div>
+          <div class="items">
+            <button class="it"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><b>Customer Portal</b><span class="tm">4 m</span>
+              <span class="l2"><span class="run-t">Deploying v5.9.0 to INT</span></span>
+              <span class="l3"><span><span class="dot busy"></span>CI</span><span><span class="dot run"></span>Local</span><span><span class="dot busy"></span>INT</span><span><span class="dot ok"></span>PROD</span></span></button>
+            <button class="it"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span><b>Webhook Relay</b><span class="tm">11:02</span>
+              <span class="l2"><span class="warn-t">3 new Sentry issues</span> · TimeoutError in deliver()</span>
+              <span class="l3"><span><span class="dot ok"></span>CI</span><span><span class="dot run"></span>Local</span><span><span class="dot ok"></span>Staging</span><span><span class="dot warn"></span>PROD</span></span></button>
+          </div>
+          <div class="lgrp">All clear <span>2</span></div>
+          <div class="items">
+            <button class="it"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><b>Identity Gateway</b><span class="tm"></span><span class="l2">4 open PRs · v3.4.0 everywhere</span></button>
+            <button class="it"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span><b>Status Page</b><span class="tm"></span><span class="l2">1 open PR · PROD 88 ms</span></button>
+          </div>
+        </div>
+
+        <div class="det">
+          <div class="dh">
+            <span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>
+            <div><h2>Billing API</h2><p>contoso/billing-api · main · Azure DevOps</p></div>
+            <div class="acts"><button class="btn line"><svg class="i"><use href="#insights"/></svg>Open in Insights</button><button class="icon-btn" aria-label="Project options"><svg class="i"><use href="#dots"/></svg></button></div>
+          </div>
+
+          <div class="alert">
+            <div>
+              <div class="pills"><span class="pill crit"><svg class="i"><use href="#alert"/></svg>Failed requests 4.2% on PROD</span><span class="pill info"><svg class="i"><use href="#approve"/></svg>v2.31.0 waiting for approval</span></div>
+              <p class="why"><b>Since 14:14</b>, mostly <span class="mono">POST /invoices/export</span> timing out against the ledger database. INT already runs v2.31.0 with the retry fix.</p>
+              <div style="display:flex;gap:8px"><button class="btn tint"><svg class="i"><use href="#approve"/></svg>Review PROD approval</button><button class="btn quiet">Open failures</button></div>
+            </div>
+            <div class="chart">
+              <div class="cap"><span>Failed requests · last 2 h</span><b class="num">4.2%</b></div>
+              <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                <line x1="0" y1="48" x2="300" y2="48" stroke="#d9533f" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke"/>
+                <path d="M0 62 L20 61 L40 63 L60 60 L80 62 L100 61 L120 62 L140 60 L160 61 L180 59 L200 62 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 18 L300 70 L0 70Z" fill="#fbe6e2"/>
+                <path d="M0 62 L20 61 L40 63 L60 60 L80 62 L100 61 L120 62 L140 60 L160 61 L180 59 L200 62 L215 60 L228 50 L240 38 L252 30 L264 26 L276 20 L288 24 L300 18" fill="none" stroke="#b03a2c" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+              </svg>
+              <div class="x num"><span>12:30</span><span>limit 2%</span><span>14:31</span></div>
+            </div>
+          </div>
+
+          <h3>Environments <span>open in their session</span></h3>
+          <div class="inset">
+            <div class="er"><svg class="i"><use href="#branch"/></svg><span class="lbl">Repo</span><span class="val"><span class="sub">2 open PRs · main</span></span><span class="mk">W</span><span class="go"><svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="er"><svg class="i"><use href="#pipeline"/></svg><span class="lbl">Pipelines</span><span class="val"><span class="dot ok"></span><span class="num">main #2148 · succeeded 41 m ago</span></span><span class="mk">W</span><span class="go"><svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="er"><svg class="i"><use href="#laptop"/></svg><span class="lbl">Local</span><span class="val"><span class="dot run"></span><span class="mono">localhost:5001</span><span class="sub">running</span></span><span class="mk">W</span><span class="go"><svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="er"><svg class="i"><use href="#globe"/></svg><span class="lbl">INT</span><span class="val"><span class="dot ok"></span><span class="num">v2.31.0 · 212 ms</span><span class="host">billing-int.contoso.com</span></span><span class="mk">W</span><span class="go"><svg class="i"><use href="#ext"/></svg></span></div>
+            <div class="er"><svg class="i"><use href="#globe"/></svg><span class="lbl">PROD</span><span class="val"><span class="dot crit"></span><span class="crit-t num">v2.30.4 · alert firing</span><span class="host">billing.contoso.com</span></span><span class="mk i">I</span><span class="go"><svg class="i"><use href="#ext"/></svg></span></div>
+          </div>
+
+          <h3>Your pull requests <span>1 of 2 open</span></h3>
+          <div class="inset">
+            <div class="prl"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Retry invoice export on ledger timeout</b><span class="repo">!482</span><span class="r"><span class="warn-t">Waiting for you · 3 threads</span><span class="go"><svg class="i" style="width:13px;color:var(--sub)"><use href="#chevron"/></svg></span></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────── Activity ───────────── -->
+      <section class="view activity">
+        <div class="listp">
+          <div class="lhead">
+            <div class="top"><h1>Activity</h1><span class="num">Checked 09:59</span></div>
+            <div class="seg"><span class="on">Yours <span class="n">5</span></span><span>Review requests <span class="n">2</span></span><span>Merged <span class="n">6</span></span></div>
+          </div>
+          <div class="lgrp">Needs you <span>2</span></div>
+          <div class="items">
+            <button class="it sel"><span class="ck fail"><svg class="i"><use href="#x"/></svg></span><b>Handle transferred seats in SeatSync</b><span class="tm">12 m</span>
+              <span class="l2">License Service · !1187 · <span class="crit-t">3 tests failed</span></span></button>
+            <button class="it"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Retry invoice export on ledger timeout</b><span class="tm">48 m</span>
+              <span class="l2">Billing API · !482 · <span class="warn-t">waiting for you</span></span></button>
+          </div>
+          <div class="lgrp">Waiting on others <span>2</span></div>
+          <div class="items">
+            <button class="it"><span class="ck run"></span><b>Add invoice download to account page</b><span class="tm">1 h</span>
+              <span class="l2">Customer Portal · !611 · e2e running · 1 of 2 approved</span></button>
+            <button class="it"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Add jitter to delivery backoff</b><span class="tm">3 h</span>
+              <span class="l2">Webhook Relay · #214 · review requested</span></button>
+          </div>
+          <div class="lgrp">Ready to merge <span>1</span></div>
+          <div class="items">
+            <button class="it"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Bump Next.js to 15.5</b><span class="tm">1 d</span>
+              <span class="l2">Status Page · #88 · <span class="ok-t">approved</span></span></button>
+          </div>
+        </div>
+
+        <div class="det">
+          <div class="dh">
+            <span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>
+            <div><h2>Handle transferred seats in SeatSync</h2><p>License Service · !1187 · <span class="br">seat-transfer</span><svg class="i" style="width:10px;height:10px"><use href="#arrowr"/></svg><span class="br">release/2.14</span> · updated 12 m ago</p></div>
+            <div class="acts"><button class="btn line">Open in DevOps<span class="mk">W</span></button></div>
+          </div>
+          <div class="state"><span class="pill crit"><svg class="i"><use href="#x"/></svg>1 check failed</span><span class="pill warn"><svg class="i"><use href="#chat"/></svg>2 threads to resolve</span><span class="pill info"><svg class="i"><use href="#approve"/></svg>1 of 2 approvals</span></div>
+
+          <h3>Checks <span>run #20261030.4 · 7 m 48 s</span></h3>
+          <div class="inset cl">
+            <div class="cr"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Build</b><span class="m">3 m 12 s</span><span class="go"><svg class="i"><use href="#chevron"/></svg></span></div>
+            <div class="cr"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Unit tests</b><span class="m">1,204 passed</span><span class="go"><svg class="i"><use href="#chevron"/></svg></span></div>
+            <div class="cr open"><span class="ck fail"><svg class="i"><use href="#x"/></svg></span><b class="crit-t">Integration tests</b><span class="m">3 of 412 failed</span><button class="btn tint" style="height:24px"><svg class="i"><use href="#reload"/></svg>Re-queue</button>
+              <div class="sub-tests">
+                <div><span class="ck fail"><svg class="i"><use href="#x"/></svg></span><span class="mono">SeatSyncTests.Sync_TransferredSeat</span></div>
+                <div><span class="ck fail"><svg class="i"><use href="#x"/></svg></span><span class="mono">SeatSyncTests.Sync_RemovedSeat</span></div>
+                <div><span class="ck fail"><svg class="i"><use href="#x"/></svg></span><span class="mono">BundleRenewalTests.Renew_ExpiredBundle</span></div>
+              </div></div>
+            <div class="cr"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Code coverage</b><span class="m">81.4% · minimum 75%</span><span class="go"><svg class="i"><use href="#chevron"/></svg></span></div>
+          </div>
+
+          <h3>Policies</h3>
+          <div class="inset cl">
+            <div class="cr"><span class="ck wait"></span><b>Required reviewers</b><span class="rvr"><span class="av a2">JL<i class="ok"><svg class="i"><use href="#check"/></svg></i></span><span class="av a3">RS</span><span class="m">1 of 2 approved</span></span><span></span></div>
+            <div class="cr"><span class="ck warn"><svg class="i"><use href="#chat"/></svg></span><b>Comments resolved</b><span class="m">2 open threads</span><span class="go"><svg class="i"><use href="#chevron"/></svg></span></div>
+            <div class="cr"><span class="ck ok"><svg class="i"><use href="#check"/></svg></span><b>Linked work item</b><span class="m">AB#5531</span><span class="go"><svg class="i"><use href="#chevron"/></svg></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="status"><span><span class="sdot" style="width:6px;height:6px;border-radius:50%;background:#527eb1"></span>Work session</span><span>Idle tabs unload after 10 min</span></div>
+  </main>
+</div>
+</body>
+</html>

@@ -19,7 +19,7 @@ int main() {
       original.setIsolated(tabID);
       original.state.idleMinutes = 30;
       original.state.sidebarVisible = false;
-      original.state.sidebarWidth = 300; original.state.controlSize = "large";
+      original.state.sidebarWidth = 300; original.state.controlSize = "large"; original.state.sidebarAnimation = "subtle"; original.state.devToolsDocked = false;
       original.setSpaceRules("personal", {"dev.azure.com/contoso/**"});
       original.space("research")->icon = "leaf";
       NSError *error = nil;
@@ -36,6 +36,7 @@ int main() {
       Check(restored.spaceForURL("https://dev.azure.com/contoso/x") == "personal", "Space rules lost");
       Check(restored.space("research")->icon == "leaf", "Space icon lost");
       Check(restored.state.controlSize == "large", "control size lost");
+      Check(restored.state.sidebarAnimation == "subtle" && !restored.state.devToolsDocked, "sidebar animation or DevTools placement lost");
       Check(restored.tab(tabID)->pinned && !restored.state.sidebarVisible && restored.state.idleMinutes == 30 && restored.state.sidebarWidth == 300, "preferences lost");
       rail::History history; history.recordVisit("https://example.com/",5); history.setTitle("https://example.com/","Example");
       Check(rail::SaveHistory(directory,history,&error), "history save failed");
@@ -50,7 +51,25 @@ int main() {
       error = nil;
       Check(!rail::LoadState(directory,restored,&error), "future schema accepted");
       Check(restored.state.activeTabID == tabID, "unknown schema mutated model");
-      std::cout << "PASS state round-trip, Unicode, preferences, Space rules, corruption, future schema\n";
+      // Theme: every theme survives a save; a missing or unknown one falls back to Porcelain
+      // and the rest of the layout is kept.
+      for (const char *theme : {"porcelain", "nightline", "daylight"}) {
+        rail::BrowserModel themed = original; themed.state.theme = theme;
+        Check(rail::SaveState(directory,themed,&error), "themed save failed");
+        rail::BrowserModel loaded;
+        Check(rail::LoadState(directory,loaded,&error) && loaded.state.theme == theme, "theme lost");
+      }
+      for (NSString *stored in @[@"", @"\"theme\":\"midnight\",", @"\"theme\":42,"]) {
+        // A state file from before themes, or with a value Rail doesn't know.
+        NSString *legacy = [NSString stringWithFormat:@"{\"version\":1,%@\"idleMinutes\":30,\"sidebarWidth\":300,\"controlSize\":\"large\",\"sessions\":[{\"id\":\"work\",\"name\":\"Work\"}],\"spaces\":[{\"id\":\"work\",\"name\":\"Work\",\"sessionID\":\"work\",\"selectedTabID\":\"t1\"}],\"tabs\":[{\"id\":\"t1\",\"spaceID\":\"work\",\"sessionID\":\"work\",\"title\":\"Kept\",\"url\":\"https://example.com/kept\"}],\"activeSpaceID\":\"work\",\"activeTabID\":\"t1\"}",stored];
+        [legacy writeToFile:[directory stringByAppendingPathComponent:@"state.json"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        rail::BrowserModel loaded; loaded.state.theme = "nightline";
+        Check(rail::LoadState(directory,loaded,&error), "state without a valid theme should still load");
+        Check(loaded.state.theme == "porcelain", "missing or unknown theme should fall back to Porcelain");
+        Check(loaded.state.activeTabID == "t1" && loaded.tab("t1") && loaded.tab("t1")->url == "https://example.com/kept" && loaded.state.idleMinutes == 30 && loaded.state.sidebarWidth == 300 && loaded.state.controlSize == "large", "theme fallback lost other state");
+      }
+      Check(rail::SaveState(directory,original,&error), "save failed");
+      std::cout << "PASS state round-trip, Unicode, preferences, Space rules, corruption, future schema, theme persistence and fallback\n";
       rail::Projects projects;
       auto projectID = projects.addProject("Billing — 請求", "work", "https://dev.azure.com/contoso/Billing/_git/billing-api", "work");
       auto envID = projects.addEnvironment(projectID, "PROD", "https://billing.contoso.com", "__isolated__", "/healthz");

@@ -15,7 +15,7 @@ bool LoadState(NSString *directory, BrowserModel &model, NSError **error) {
   if (!data) return false;
   id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
   if (![value isKindOfClass:NSDictionary.class] || Number(value[@"version"],0) != 1) {
-    if (error && !*error) *error = [NSError errorWithDomain:@"Eimerrail" code:1 userInfo:@{NSLocalizedDescriptionKey:@"The saved layout is not a supported Eimerrail state file."}];
+    if (error && !*error) *error = [NSError errorWithDomain:@"Rail" code:1 userInfo:@{NSLocalizedDescriptionKey:@"The saved layout is not a supported Rail state file."}];
     return false;
   }
   State state;
@@ -26,6 +26,8 @@ bool LoadState(NSString *directory, BrowserModel &model, NSError **error) {
   state.activeSpaceID = Text(value[@"activeSpaceID"]); state.activeTabID = Text(value[@"activeTabID"]);
   state.idleMinutes = Number(value[@"idleMinutes"],10); state.sidebarVisible = ReadBoolean(value[@"sidebarVisible"],true);
   state.sidebarWidth = Number(value[@"sidebarWidth"],210); state.controlSize = Text(value[@"controlSize"]);
+  state.sidebarAnimation = Text(value[@"sidebarAnimation"]); state.theme = Text(value[@"theme"]);
+  state.devToolsDocked = ReadBoolean(value[@"devToolsDocked"],true); state.devToolsWidth = Number(value[@"devToolsWidth"],480);
   model.state = std::move(state); model.sanitize(NSDate.date.timeIntervalSince1970);
   return true;
 }
@@ -36,7 +38,7 @@ bool SaveState(NSString *directory, const BrowserModel &model, NSError **error) 
   for (const auto &s : model.state.spaces) [spaces addObject:@{@"id":S(s.id),@"name":S(s.name),@"sessionID":S(s.sessionID),@"selectedTabID":S(s.selectedTabID),@"icon":S(s.icon)}];
   for (const auto &t : model.state.tabs) [tabs addObject:@{@"id":S(t.id),@"spaceID":S(t.spaceID),@"sessionID":S(t.sessionID),@"title":S(t.title),@"url":S(t.url),@"pinned":@(t.pinned),@"pinnedURL":S(t.pinnedURL),@"pinnedTitle":S(t.pinnedTitle),@"customTitle":S(t.customTitle)}];
   for (const auto &r : model.state.spaceRules) [rules addObject:@{@"pattern":S(r.pattern),@"spaceID":S(r.spaceID)}];
-  NSDictionary *state = @{@"version":@1,@"sessions":sessions,@"spaces":spaces,@"tabs":tabs,@"spaceRules":rules,@"activeSpaceID":S(model.state.activeSpaceID),@"activeTabID":S(model.state.activeTabID),@"idleMinutes":@(model.state.idleMinutes),@"sidebarVisible":@(model.state.sidebarVisible),@"sidebarWidth":@(model.state.sidebarWidth),@"controlSize":S(model.state.controlSize)};
+  NSDictionary *state = @{@"version":@1,@"sessions":sessions,@"spaces":spaces,@"tabs":tabs,@"spaceRules":rules,@"activeSpaceID":S(model.state.activeSpaceID),@"activeTabID":S(model.state.activeTabID),@"idleMinutes":@(model.state.idleMinutes),@"sidebarVisible":@(model.state.sidebarVisible),@"sidebarWidth":@(model.state.sidebarWidth),@"controlSize":S(model.state.controlSize),@"sidebarAnimation":S(model.state.sidebarAnimation),@"theme":S(model.state.theme),@"devToolsDocked":@(model.state.devToolsDocked),@"devToolsWidth":@(model.state.devToolsWidth)};
   NSData *data = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted error:error];
   if (!data) return false;
   return [data writeToFile:[directory stringByAppendingPathComponent:@"state.json"] options:NSDataWritingAtomic error:error];
@@ -67,7 +69,7 @@ bool LoadProjects(NSString *directory, Projects &projects, NSError **error) {
   if (!data) return false;
   id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
   if (![value isKindOfClass:NSDictionary.class] || Number(value[@"version"],0) != 1) {
-    if (error && !*error) *error = [NSError errorWithDomain:@"Eimerrail" code:2 userInfo:@{NSLocalizedDescriptionKey:@"The saved projects are not a supported Eimerrail projects file."}];
+    if (error && !*error) *error = [NSError errorWithDomain:@"Rail" code:2 userInfo:@{NSLocalizedDescriptionKey:@"The saved projects are not a supported Rail projects file."}];
     return false;
   }
   ProjectsState state;
@@ -105,7 +107,7 @@ bool LoadReading(NSString *directory, ReadingList &reading, NSError **error) {
   if (!data) return false;
   id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
   if (![value isKindOfClass:NSDictionary.class] || Number(value[@"version"],0) != 1) {
-    if (error && !*error) *error = [NSError errorWithDomain:@"Eimerrail" code:3 userInfo:@{NSLocalizedDescriptionKey:@"The saved reading list is not a supported Eimerrail file."}];
+    if (error && !*error) *error = [NSError errorWithDomain:@"Rail" code:3 userInfo:@{NSLocalizedDescriptionKey:@"The saved reading list is not a supported Rail file."}];
     return false;
   }
   ReadingState state;

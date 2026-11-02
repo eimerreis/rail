@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Settings · A · Settings in the sidebar</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<style>
+/* The sidebar becomes the settings index; the page area shows one category. */
+.set-head{display:flex;align-items:center;gap:6px;padding:4px 11px 0 9px;font-size:13px;font-weight:650}
+.set-head .back{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--sub)}
+.set-head .back svg{width:14px;height:14px}
+.set-head kbd{margin-left:auto;font-size:9px}
+.set-desc{font-size:10px;color:var(--sub);padding:3px 15px 10px}
+.find{margin:0 12px 6px;height:26px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:6px;background:#fff;border:1px solid var(--line);font-size:11px;color:var(--sub)}
+.find svg{width:12px;height:12px}
+.cat{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px 0 9px;border-radius:7px;font-size:11px;white-space:nowrap}
+.cat svg{width:15px;height:15px;color:#52708a}
+.cat .t{flex:1}
+.cat .v{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
+.cat.sel{background:var(--selected);color:var(--accent)}
+.cat.sel .t{font-weight:550}
+.cat.sel svg,.cat.sel .v{color:var(--accent)}
+.side-foot.calm{color:var(--sub)}
+
+/* Pane */
+.page{padding:34px 0 0;overflow:auto}
+.pane{width:640px;margin:0 auto}
+.pane h1{font-size:22px;font-weight:650;letter-spacing:-.4px;margin:0 0 5px}
+.pane .lede{margin:0 0 26px;font-size:12px;color:var(--sub)}
+.group{border-top:1px solid var(--line);padding:22px 0 26px;display:grid;grid-template-columns:200px 1fr;column-gap:28px}
+.group h2{font-size:13px;font-weight:650;margin:0 0 5px}
+.group .why{font-size:11px;line-height:1.5;color:var(--sub);margin:0}
+.group .why kbd{font-size:9px}
+
+/* Interface size */
+.sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.size{border:1px solid var(--line);border-radius:10px;padding:10px 10px 9px;background:#fff;display:grid;gap:8px}
+.size.on{border-color:var(--accent-strong);box-shadow:0 0 0 1px var(--accent-strong)}
+.size .lab{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:550}
+.size .lab .r{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px #b3c0cd}
+.size.on .lab .r{box-shadow:inset 0 0 0 4px var(--accent-strong)}
+.mini-rows{height:58px;border-radius:6px;background:var(--sidebar);padding:7px;display:grid;align-content:start;gap:4px;overflow:hidden}
+.mini-rows i{display:block;border-radius:3px;background:#dbe3ec}
+.mini-rows i.s{background:var(--selected)}
+
+/* Sidebar animation — the signature: each option plays its own slide */
+.motions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.mo{border:1px solid var(--line);border-radius:10px;background:#fff;padding:10px 10px 11px;display:grid;gap:9px;align-content:start;text-align:left}
+.mo.on{border-color:var(--accent-strong);box-shadow:0 0 0 1px var(--accent-strong)}
+.mo .lab{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:550}
+.mo .lab .r{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px #b3c0cd}
+.mo.on .lab .r{box-shadow:inset 0 0 0 4px var(--accent-strong)}
+.mo .spec{font-size:11px;color:var(--sub);line-height:1.45}
+.stage{position:relative;height:74px;border-radius:7px;background:#fff;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
+.stage .tb{position:absolute;left:0;right:0;top:0;height:11px;background:var(--shell);border-bottom:1px solid var(--line-soft)}
+.stage .pg{position:absolute;top:11px;bottom:0;right:0;left:0;padding:9px 10px;display:grid;align-content:start;gap:5px}
+.stage .pg i{display:block;height:4px;border-radius:2px;background:#e3e8ee}
+.stage .sb{position:absolute;top:0;bottom:0;left:0;width:46px;background:var(--sidebar);border-right:1px solid var(--line);display:flex}
+.stage .sb b{width:10px;background:var(--rail);border-right:1px solid var(--rail-line)}
+.stage .sb span{flex:1;padding:14px 4px;display:grid;align-content:start;gap:3px}
+.stage .sb span i{display:block;height:4px;border-radius:2px;background:#d4dde6}
+.stage .sb span i.s{background:#b9d0ea}
+/* Full: the whole navigation slides 46px with the shell's curve. Subtle: a short slide that fades. Off: a cut. */
+.full .sb{animation:full 2.8s cubic-bezier(.16,1,.3,1) infinite}
+.full .pg{animation:fullpg 2.8s cubic-bezier(.16,1,.3,1) infinite}
+@keyframes full{0%,30%{transform:translateX(0)}40%,80%{transform:translateX(-47px)}90%,100%{transform:translateX(0)}}
+@keyframes fullpg{0%,30%{left:46px}40%,80%{left:0}90%,100%{left:46px}}
+.subtle .sb{animation:subtle 2.8s cubic-bezier(.2,.8,.2,1) infinite}
+.subtle .pg{animation:subtlepg 2.8s cubic-bezier(.2,.8,.2,1) infinite}
+@keyframes subtle{0%,32%{transform:translateX(0);opacity:1}38%,80%{transform:translateX(-12px);opacity:0}86%,100%{transform:translateX(0);opacity:1}}
+@keyframes subtlepg{0%,32%{left:46px}38%,80%{left:0}86%,100%{left:46px}}
+.off .sb{animation:cut 2.8s steps(1,end) infinite}
+.off .pg{animation:cutpg 2.8s steps(1,end) infinite}
+@keyframes cut{0%,34%{visibility:visible}35%,84%{visibility:hidden}85%,100%{visibility:visible}}
+@keyframes cutpg{0%,34%{left:46px}35%,84%{left:0}85%,100%{left:46px}}
+@media (prefers-reduced-motion:reduce){.stage *{animation:none!important}}
+.note{grid-column:2;margin-top:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub);padding:8px 10px;border-radius:7px;background:#f4f7fa}
+.note svg{width:14px;height:14px;color:#52708a}
+.note a{margin-left:auto;color:var(--accent);text-decoration:none;font-weight:550}
+.preview-strip{grid-column:2;display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--sub)}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script src="icons.js"></script>
+<div class="win">
+  <nav class="rail" aria-label="Spaces">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <button class="rail-btn" aria-label="Work Space"><svg class="i"><use href="#work"/></svg></button>
+    <button class="rail-btn" aria-label="Personal Space"><svg class="i"><use href="#home"/></svg></button>
+    <button class="rail-btn" aria-label="Research Space"><svg class="i"><use href="#book"/></svg></button>
+    <div class="rail-bottom">
+      <button class="rail-btn" aria-label="New Space"><svg class="i"><use href="#plus"/></svg></button>
+      <button class="rail-btn current" aria-label="Settings" aria-current="page"><svg class="i"><use href="#sliders"/></svg></button>
+    </div>
+  </nav>
+
+  <aside class="sidebar" aria-label="Settings">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><button class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></button></div>
+    <div class="set-head"><button class="back" aria-label="Back to Work"><svg class="i"><use href="#arrowleft"/></svg></button>Settings<kbd>esc</kbd></div>
+    <div class="set-desc">Back to Work with esc or ⌘ ,</div>
+    <div class="find"><svg class="i"><use href="#search"/></svg>Find a setting</div>
+    <div class="sec">Browser</div>
+    <div class="rows">
+      <div class="cat sel"><svg class="i"><use href="#appearance"/></svg><span class="t">Appearance</span><span class="v">Small · Full</span></div>
+      <div class="cat"><svg class="i"><use href="#tabs"/></svg><span class="t">Tabs</span><span class="v">10 min</span></div>
+      <div class="cat"><svg class="i"><use href="#wrench"/></svg><span class="t">Developer</span><span class="v">Docked</span></div>
+      <div class="cat"><svg class="i"><use href="#compass"/></svg><span class="t">Default browser</span><span class="v">Yes</span></div>
+    </div>
+    <div class="sec">Organize</div>
+    <div class="rows">
+      <div class="cat"><svg class="i"><use href="#spaces"/></svg><span class="t">Spaces</span><span class="v">3</span></div>
+      <div class="cat"><svg class="i"><use href="#session"/></svg><span class="t">Sessions</span><span class="v">2</span></div>
+      <div class="cat"><svg class="i"><use href="#link2"/></svg><span class="t">Link rules</span><span class="v">4</span></div>
+      <div class="cat"><svg class="i"><use href="#grid"/></svg><span class="t">Projects</span><span class="v">5</span></div>
+      <div class="cat"><svg class="i"><use href="#key"/></svg><span class="t">Connections</span><span class="v">2</span></div>
+    </div>
+    <div class="side-scroll"></div>
+    <div class="side-foot calm">Changes apply right away</div>
+  </aside>
+
+  <main class="content">
+    <div class="toolbar">
+      <button class="icon-btn dim"><svg class="i"><use href="#back"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></button>
+      <button class="icon-btn dim"><svg class="i"><use href="#reload"/></svg></button>
+      <div class="url"><svg class="i"><use href="#sliders"/></svg><b>Settings</b>&nbsp;· Appearance</div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+
+    <div class="page">
+      <div class="pane">
+        <h1>Appearance</h1>
+        <p class="lede">How the sidebar, Spaces rail and Space home look and move. Web pages keep their own zoom.</p>
+
+        <section class="group" aria-labelledby="size-h">
+          <div><h2 id="size-h">Interface size</h2><p class="why">Scales the sidebar, rail and Space home together. The toolbar stays the same size.</p></div>
+          <div class="sizes" role="radiogroup" aria-labelledby="size-h">
+            <div class="size on" role="radio" aria-checked="true"><div class="lab">Small<span class="r"></span></div><div class="mini-rows"><i class="s" style="height:7px"></i><i style="height:7px"></i><i style="height:7px"></i><i style="height:7px"></i><i style="height:7px;width:70%"></i></div></div>
+            <div class="size" role="radio" aria-checked="false"><div class="lab">Normal<span class="r"></span></div><div class="mini-rows"><i class="s" style="height:8.5px"></i><i style="height:8.5px"></i><i style="height:8.5px"></i><i style="height:8.5px;width:70%"></i></div></div>
+            <div class="size" role="radio" aria-checked="false"><div class="lab">Large<span class="r"></span></div><div class="mini-rows"><i class="s" style="height:10px"></i><i style="height:10px"></i><i style="height:10px;width:70%"></i></div></div>
+          </div>
+        </section>
+
+        <section class="group" aria-labelledby="motion-h">
+          <div><h2 id="motion-h">Sidebar animation</h2><p class="why">How the sidebar and rail leave and return when you press <kbd>⌘ S</kbd>.</p></div>
+          <div class="motions" role="radiogroup" aria-labelledby="motion-h">
+            <button class="mo off" role="radio" aria-checked="false">
+              <span class="lab">Off<span class="r"></span></span>
+              <span class="stage"><span class="tb"></span><span class="pg"><i style="width:80%"></i><i></i><i style="width:60%"></i></span><span class="sb"><b></b><span><i class="s"></i><i></i><i></i></span></span></span>
+              <span class="spec">Hides and shows at once.</span>
+            </button>
+            <button class="mo subtle" role="radio" aria-checked="false">
+              <span class="lab">Subtle<span class="r"></span></span>
+              <span class="stage"><span class="tb"></span><span class="pg"><i style="width:80%"></i><i></i><i style="width:60%"></i></span><span class="sb"><b></b><span><i class="s"></i><i></i><i></i></span></span></span>
+              <span class="spec">A short fade, 0.14 s. The page widens at once.</span>
+            </button>
+            <button class="mo full on" role="radio" aria-checked="true">
+              <span class="lab">Full<span class="r"></span></span>
+              <span class="stage"><span class="tb"></span><span class="pg"><i style="width:80%"></i><i></i><i style="width:60%"></i></span><span class="sb"><b></b><span><i class="s"></i><i></i><i></i></span></span></span>
+              <span class="spec">The rail and sidebar slide out, 0.22 s. The page follows.</span>
+            </button>
+          </div>
+          <div class="note"><svg class="i"><use href="#info"/></svg>Reduce motion is off in macOS, so Full is used.<a href="#">Accessibility…</a></div>
+        </section>
+      </div>
+    </div>
+    <div class="status"><span>Work session</span><span>Settings are saved with your layout</span></div>
+  </main>
+</div>
+</body>
+</html>

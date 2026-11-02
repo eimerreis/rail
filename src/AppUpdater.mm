@@ -26,7 +26,7 @@
 - (void)start {
   if (self.running) return;
   NSFileManager *files=NSFileManager.defaultManager;
-  NSString *cache=[NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"de.eimerreis.eimerrail/updater"];
+  NSString *cache=[NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"de.eimerreis.rail/updater"];
   NSString *run=[cache stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
   NSString *script=[run stringByAppendingPathComponent:@"reinstall-main.sh"];
   NSString *bundled=[NSBundle.mainBundle pathForResource:@"reinstall-main" ofType:@"sh"];
@@ -34,7 +34,7 @@
   _log=nil;
   if (![files createDirectoryAtPath:run withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:&error] ||
       !bundled || ![files copyItemAtPath:bundled toPath:script error:&error]) {
-    [self failed:error.localizedDescription ?: @"The reinstall worker is missing. Rebuild Eimerrail first."]; return;
+    [self failed:error.localizedDescription ?: @"The reinstall worker is missing. Rebuild Rail first."]; return;
   }
   _log=[run stringByAppendingPathComponent:@"update.log"];
   if (![files createFileAtPath:_log contents:nil attributes:@{NSFilePosixPermissions:@0600}]) {
@@ -45,7 +45,7 @@
   _worker.executableURL=[NSURL fileURLWithPath:@"/bin/bash"];
   NSDictionary *info=NSBundle.mainBundle.infoDictionary;
   NSMutableArray *arguments=[NSMutableArray arrayWithArray:@[script,cache,run,NSBundle.mainBundle.bundlePath.stringByResolvingSymlinksInPath,
-    [NSString stringWithFormat:@"%d",NSProcessInfo.processInfo.processIdentifier],info[@"EimerrailSigningIdentity"] ?: @"AUTO",info[@"EimerrailGitHubClientID"] ?: @""]];
+    [NSString stringWithFormat:@"%d",NSProcessInfo.processInfo.processIdentifier],info[@"RailSigningIdentity"] ?: @"AUTO",info[@"RailGitHubClientID"] ?: @""]];
   NSArray *launchArguments=NSProcessInfo.processInfo.arguments;
   if (launchArguments.count>1) [arguments addObjectsFromArray:[launchArguments subarrayWithRange:NSMakeRange(1,launchArguments.count-1)]];
   _worker.arguments=arguments;
@@ -63,7 +63,7 @@
     _worker=nil; [output closeFile]; [self failed:error.localizedDescription]; return;
   }
   [output closeFile];
-  if (self.onStatus) self.onStatus(@"Building latest main… Eimerrail will restart when ready.");
+  if (self.onStatus) self.onStatus(@"Building latest main… Rail will restart when ready.");
   _readyTimer=[NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
     if (![files fileExistsAtPath:[run stringByAppendingPathComponent:@"ready"]]) return;
     [timer invalidate];

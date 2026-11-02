@@ -5,6 +5,13 @@ typedef NS_ENUM(NSInteger, ProjectTone) {
   ProjectToneRunning, ProjectToneStopped, ProjectToneBusy, ProjectToneUnknown
 };
 
+// Shared drawing for project and activity views.
+NSColor *ProjectToneText(ProjectTone tone);
+NSColor *ProjectToneFill(ProjectTone tone);
+void ProjectDrawDot(NSRect frame, ProjectTone tone);
+void ProjectDrawMark(NSRect frame, NSString *mark, NSInteger style);
+NSImage *ProjectStateSymbol(ProjectTone tone, CGFloat size);
+
 // A coloured status label on a card. Clickable when it has a handler.
 @interface ProjectPill : NSObject
 @property(nonatomic, copy) NSString *title;
@@ -14,13 +21,14 @@ typedef NS_ENUM(NSInteger, ProjectTone) {
 @property(nonatomic, copy) void (^handler)(void);
 @end
 
-// One row in the card's button stack: Repo, Pipelines, or an environment.
+// One step on a project's path: Local, Repo, Pipelines, or an environment.
 @interface ProjectRow : NSObject
+@property(nonatomic) BOOL local;                // drawn apart from the promotion path
 @property(nonatomic, copy) NSString *symbol;
 @property(nonatomic, copy) NSString *label;
 @property(nonatomic, copy) NSString *value;
 @property(nonatomic) ProjectTone tone;          // dot and value colour; Neutral draws no dot
-@property(nonatomic, copy) NSString *mark;      // session initial: W, P, I
+@property(nonatomic, copy) NSString *mark;      // session initial: W, P, I; nil when it's the Space's own session
 @property(nonatomic) NSInteger markStyle;       // 0 work, 1 personal, 2 isolated
 @property(nonatomic, copy) NSString *help;
 @property(nonatomic, copy) void (^handler)(void);
@@ -49,10 +57,12 @@ typedef NS_ENUM(NSInteger, ProjectTone) {
 @property(nonatomic, copy) NSArray<ProjectChip *> *chips;
 @property(nonatomic) BOOL needsAttention;
 @property(nonatomic) BOOL runsLocally;
+@property(nonatomic) BOOL moving;               // a pipeline or deployment is under way
 @property(nonatomic, strong) NSMenu *menu;
 @end
 
-// The Space home: a header with filters and a grid of project cards.
+// The Space's Projects page: a header with filters and one lane per project, grouped by state.
+// Each lane reads left to right: what runs locally, then repo → pipeline → each environment.
 @interface ProjectsHomeView : RailPanel
 @property(nonatomic, copy) NSString *spaceName;
 @property(nonatomic, copy) NSString *summary;

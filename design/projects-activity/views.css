@@ -1,0 +1,60 @@
+/* Projects + Activity mockups. Extends ../project-overview/shell.css; same Rail light tokens. */
+:root{--row-hover:#f3f6f9;--row-sel:#eaf2fb;--mute2:#66727f}
+
+/* Sidebar: two Space destinations replace the single "Space home" row */
+.navrows{padding:0 7px;display:grid;gap:1px}
+.navrow{display:flex;align-items:center;gap:9px;height:31px;padding:0 8px 0 9px;border-radius:7px;font-size:11.5px;white-space:nowrap;width:100%;text-align:left}
+.navrow:hover{background:var(--hover)}
+.navrow:focus-visible{outline:2px solid var(--accent-strong);outline-offset:-2px}
+.navrow svg{width:15px;height:15px;color:var(--sub)}
+.navrow .t{flex:1}
+.navrow[aria-current="page"]{background:var(--selected);color:var(--accent)}
+.navrow[aria-current="page"] .t{font-weight:600}
+.navrow[aria-current="page"] svg{color:var(--accent)}
+.nb{min-width:17px;height:16px;padding:0 5px;border-radius:8px;font-size:9.5px;font-weight:700;display:inline-grid;place-items:center;font-variant-numeric:tabular-nums}
+.nb.crit{background:var(--crit-dot);color:#fff}
+.nb.soft{background:#dfe6ee;color:var(--sub)}
+
+/* View switching (hash routed so each view can be screenshotted) */
+.view{display:none;height:100%}
+body[data-view="projects"] .view.projects,body[data-view="activity"] .view.activity{display:flex;flex-direction:column}
+
+/* Page head shared by both views */
+.ph{display:flex;align-items:flex-end;gap:16px;padding:28px 36px 18px}
+.ph h1{font-size:22px;font-weight:650;letter-spacing:-.4px;margin:0 0 5px}
+.ph p{margin:0;font-size:12px;color:var(--sub);display:flex;gap:14px;align-items:center}
+.ph p span{display:inline-flex;align-items:center;gap:6px}
+.ph .tools{margin-left:auto;display:flex;gap:10px;align-items:center}
+.search{display:flex;align-items:center;gap:7px;height:28px;width:200px;padding:0 9px;border-radius:7px;background:#f1f4f7;box-shadow:inset 0 0 0 1px var(--line-soft);font-size:11px;color:var(--mute2)}
+.search svg{width:12px;height:12px}
+.search kbd{margin-left:auto}
+
+/* Check-state glyphs: shape + color, never color alone */
+.ck{width:14px;height:14px;border-radius:50%;display:inline-grid;place-items:center;flex-shrink:0;color:#fff}
+.ck svg{width:9px;height:9px;stroke-width:2.6}
+.ck.ok{background:var(--ok-dot)}
+.ck.fail{background:var(--crit-dot)}
+.ck.warn{background:var(--warn-dot)}
+.ck.run{border:2px solid #c8d8ea;border-top-color:var(--run);animation:spin 1.1s linear infinite}
+.ck.wait{box-shadow:inset 0 0 0 1.5px var(--off)}
+.ck.wait::after{content:"";width:4px;height:4px;border-radius:50%;background:var(--off)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ck.run{animation:none}}
+
+/* Reviewer avatars */
+.avs{display:inline-flex;align-items:center}
+.av{position:relative;width:20px;height:20px;border-radius:50%;display:inline-grid;place-items:center;font-size:8.5px;font-weight:700;color:#fff;box-shadow:0 0 0 2px #fff;flex-shrink:0}
+.av + .av{margin-left:3px}
+.av.a1{background:#587089}.av.a2{background:#476d4e}.av.a3{background:#7a5838}.av.a4{background:#6b4fa6}.av.a5{background:#35618e}
+.av i{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 0 1.5px #fff}
+.av i svg{width:7px;height:7px;stroke-width:3;color:#fff}
+.av i.ok{background:var(--ok-dot)}
+.av i.wait{background:var(--warn-dot)}
+
+.repo{font-size:10.5px;color:var(--sub);white-space:nowrap}
+.br{font-family:var(--mono);font-size:10px;color:var(--sub);letter-spacing:-.01em}
+.crit-t{color:var(--crit);font-weight:550}
+.warn-t{color:var(--warn);font-weight:550}
+.ok-t{color:var(--ok);font-weight:550}
+.run-t{color:var(--run);font-weight:550}
+.sub{color:var(--sub)}

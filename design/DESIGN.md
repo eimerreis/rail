@@ -151,6 +151,29 @@ components:
 
 # Design System: Rail light
 
+## Current shell: rounded R, Manrope, three themes — implemented 2026-10-30
+
+This section supersedes the light-only tokens and rules further down, which remain as the record of the earlier Rail light shell and its comparison concepts. The contract was the [branding handover](../docs/handoff/rail-branding/HANDOVER.md).
+
+- **Mark.** The approved rounded R (`icon/rail-r-variants/rail-r-02-rounded.png`), cream `#FEEFD7` on a near-black `#050505` tile, unchanged in every theme. `scripts/make-rail-icon.swift` redraws it as vectors (`icon/rail-r/` holds previews and a fidelity overlay) and writes `resources/AppIcon.icns` and `resources/RailMark.pdf`. The tile sits at the top of the Spaces rail, level with the **Rail** wordmark (Manrope 700) in the sidebar; the Space name follows below.
+- **Type.** Manrope, bundled, for Rail-drawn UI: 450 body, 530 medium, 600 labels and selection, 700 page titles and the wordmark; tabular figures for counts, ages and sizes. Native menus and platform controls (segmented controls, pop-ups, text fields) keep the system font. Sizes are unchanged from the previous shell and scale with Small / Normal / Large.
+- **Themes.** Settings → Appearance → Theme, saved as `theme` in `state.json` (`porcelain`, `nightline`, `daylight`; anything else reads as Porcelain). Every colour is a semantic role in `src/Theme.mm` (`RailRole`): surfaces (rail, shell, sidebar, content, raised, sunken), text, lines, hover/pressed/selected/focus, field, the current Space tile, pins, project states (ink, fill and dot per state) and session markers. Text pairs meet 4.5:1; state dots and focus rings 3:1.
+
+| Role | Porcelain | Nightline | Daylight |
+| --- | --- | --- | --- |
+| Rail / shell / sidebar | `#E3DDD2` / `#EEEAE2` / `#E8E3D9` | `#0F2427` / `#122A2D` / `#173237` | `#D5E3EE` / `#E5EEF5` / `#DCE8F1` |
+| Built-in page / raised | `#FAF8F2` / `#FFFDF9` | `#1D3A3D` / `#224344` | `#FCFDFE` / `#FFFFFF` |
+| Ink / muted | `#292D29` / `#575B52` | `#F5EBD7` / `#A6BAB2` | `#243B50` / `#4A6172` |
+| Accent and focus / selected fill | `#526A54` / `#DCE5D7` | `#A8CABB` / `#315950` | `#2C6184` / `#CADFED` |
+| Current Space tile / its icon | `#526A54` / `#F7F1E3` | `#F5EBD7` / `#173237` | `#C2654A` / `#FFF6EC` |
+
+Daylight's coral is darkened slightly from the mock-up's `#C76B50` so the tile reaches 3:1 against the rail. The coral appears only on the current Space and the short bar beside it at the rail's edge; all themes use that bar.
+
+- **Native appearance.** Nightline gives Rail's windows, sheets and popovers the dark system appearance; the light themes use Aqua. Only Rail's windows are set, so web pages keep following macOS for `prefers-color-scheme`, as before.
+- **Kept fixed.** Provider badges (GitHub, Azure DevOps), reviewer avatars and the Settings category tiles are identity colours and look the same in every theme. The page area behind a loading website stays white.
+
+The rules below that say "light mode" or forbid dark mode applied to the earlier shell; Nightline is now a user-selected theme.
+
 ## Overview
 
 **Creative North Star: "Rail in light mode"**
@@ -231,6 +254,6 @@ Rounded rectangles scale with purpose: tiny session markers, compact controls, r
 - Do preserve the reduced-motion override for sidebar and loading animation.
 
 ### Don't:
-- Don't revert the selected Rail shell to dark mode without user direction.
+- Don't add themes or change the default without user direction; the three themes above were selected by the user.
 - Don't promote the sample article’s typography or fictional brand into the browser shell.
 - Don't imply that this HTML simulates real websites, persistent browser sessions, or measured memory savings.

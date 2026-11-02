@@ -16,7 +16,7 @@ const requests = [];
 const fixture = createServer((request, response) => {
   requests.push(request.url);
   response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
-  response.end(`<!doctype html><meta charset="utf-8"><title>Rail ${request.url}</title><style>body{font:18px system-ui;padding:48px;color:#273445}</style><h1>Rail browser test</h1><p>This page runs inside Chromium.</p><a href="/popup" target="_blank">Open another tab</a>`);
+  response.end(`<!doctype html><meta charset="utf-8"><title>Rail ${request.url}</title><style>body{font:18px system-ui;padding:48px;color:#273445}</style><h1>Rail browser test</h1><p>This page runs inside Chromium.</p><a href="/popup" target="_blank">Open another tab</a><p><a id="middle" href="/middle">Middle-click link</a></p>`);
 });
 fixture.listen(0, '127.0.0.1'); await once(fixture, 'listening');
 const origin = `http://127.0.0.1:${fixture.address().port}`;
@@ -46,7 +46,7 @@ async function command(action, args = {}) {
 }
 async function targets() { return (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).filter(t => t.type === 'page'); }
 async function target(url) { return until(`page ${url}`, async () => (await targets()).find(t => t.url === url && t.title.startsWith('Rail '))); }
-async function evaluate(url, expression) {
+async function cdp(url, method, params) {
   const page = await target(url);
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   await once(socket, 'open');
@@ -54,16 +54,32 @@ async function evaluate(url, expression) {
     const timer = setTimeout(() => reject(new Error('CDP timeout')), 5000);
     socket.addEventListener('message', e => { const data = JSON.parse(e.data); if (data.id === 1) { clearTimeout(timer); data.error ? reject(new Error(data.error.message)) : resolve(data.result); } });
   });
-  socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true, userGesture: true } }));
-  try { const result = await response; if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails)); return result.result.value; }
+  socket.send(JSON.stringify({ id: 1, method, params }));
+  try { return await response; }
   finally { socket.close(); }
+}
+async function evaluate(url, expression) {
+  const result = await cdp(url, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+  if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+  return result.result.value;
+}
+async function clickLink(url, path, { button = 'middle', modifiers = 0, blank = false } = {}) {
+  const point = await evaluate(url, `(() => {
+    const link = document.querySelector('#middle');
+    link.href = ${JSON.stringify(path)};
+    link.target = ${JSON.stringify(blank ? '_blank' : '')};
+    const r = link.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  for (const type of ['mousePressed', 'mouseReleased'])
+    await cdp(url, 'Input.dispatchMouseEvent', { type, ...point, button, modifiers, clickCount: 1 });
 }
 function passed(message) { checks++; console.log(`PASS ${message}`); }
 async function start() {
   await rm(resolve(profile, 'automation-state.json'), { force: true });
   await rm(resolve(profile, 'automation-command.json'), { force: true });
   const log = openSync(resolve(profile, 'app.log'), 'a');
-  child = spawn(resolve(root, 'build/Release/Eimerrail.app/Contents/MacOS/Eimerrail'), [`--data-dir=${profile}`, '--automation', `--debug-port=${debugPort}`], { stdio: ['ignore', log, log] });
+  child = spawn(resolve(root, 'build/Release/Rail.app/Contents/MacOS/Rail'), [`--data-dir=${profile}`, '--automation', `--debug-port=${debugPort}`], { stdio: ['ignore', log, log] });
   closeSync(log); childExit = once(child, 'exit');
   return until('native app startup', state, 25000);
 }
@@ -172,6 +188,34 @@ try {
   assert.equal(await evaluate(isolatedB.url, 'document.cookie'), '');
   assert.equal(await evaluate(isolatedA.url, 'document.cookie'), 'identity=isolated-a');
   passed('each isolated tab has its own cookie store');
+  for (const [source, options, name] of [
+    [workA, {}, 'middle-work'],
+    [workA, { blank: true }, 'middle-blank'],
+    [isolatedA, {}, 'middle-isolated'],
+    [workA, { button: 'left', modifiers: 4 }, 'command-click'],
+    [workA, { modifiers: 8 }, 'shift-middle'],
+  ]) {
+    await command('select', { tab: source.id });
+    const before = (await state()).tabs.length;
+    const destination = origin + '/' + name;
+    await clickLink(source.url, destination, options);
+    const opened = await until(`new tab for ${name}`, async () => (await state()).tabs.find(t => t.url === destination && t.id !== source.id));
+    await target(destination);
+    const current = await state();
+    assert.equal(current.tabs.length, before + 1, 'Click opens exactly one new tab');
+    assert.equal(current.tabs.find(t => t.id === source.id).url, source.url, 'Source page stays unchanged');
+    assert.equal(current.activeTab, options.modifiers === 8 ? opened.id : source.id, 'Click respects foreground/background disposition');
+    if (source === isolatedA) {
+      assert.notEqual(opened.session, current.tabs.find(t => t.id === source.id).session);
+      assert.equal(await evaluate(destination, 'document.cookie'), '');
+    } else {
+      assert.equal(opened.session, 'work');
+      assert.equal(await evaluate(destination, 'document.cookie'), 'identity=work');
+    }
+    await command('close', { tab: opened.id });
+    await until(`closed ${name}`, async () => !(await state()).tabs.some(t => t.id === opened.id));
+    passed(`${name} opens a new tab with the expected selection and session`);
+  }
   await command('select', { tab: workA.id });
   await evaluate(workA.url, `void window.open(${JSON.stringify(origin + '/popup-work')})`);
   await target(origin + '/popup-work');
@@ -226,6 +270,9 @@ try {
   passed('typing replaces the address bar inline completion, as in Chrome');
   await command('select', { tab: isolatedA.id });
   await stop(); passed('CEF closes all browser views and exits cleanly');
+  const savedState = JSON.parse(await readFile(resolve(profile, 'state.json'), 'utf8'));
+  savedState.spaceRules.push({ pattern: `${origin}/middle-routed`.replace('http://', ''), spaceID: 'personal' });
+  await writeFile(resolve(profile, 'state.json'), JSON.stringify(savedState));
   s = await start();
   assert.equal(s.activeTab, isolatedA.id);
   assert.ok(s.tabs.find(t => t.id === workA.id)?.pinned);
@@ -236,6 +283,20 @@ try {
   await command('select', { tab: workA.id });
   assert.equal(await evaluate(workA.url, 'document.cookie'), 'identity=work');
   passed('named session login persists after restart');
+  await clickLink(workA.url, origin + '/middle-routed');
+  const routed = await until('middle-click routed to Personal', async () => (await state()).tabs.find(t => t.url === origin + '/middle-routed'));
+  assert.equal(routed.space, 'personal'); assert.equal(routed.session, 'personal');
+  assert.equal((await state()).activeTab, workA.id);
+  assert.equal((await state()).activeSpace, 'work');
+  assert.equal(await evaluate(origin + '/middle-routed', 'document.cookie'), 'identity=personal');
+  passed('middle-click respects Space rules and destination session while keeping the source selected');
+  const plain = await newTab('/plain-click');
+  const beforePlain = (await state()).tabs.length;
+  await clickLink(plain.url, origin + '/plain-destination', { button: 'left' });
+  await target(origin + '/plain-destination');
+  assert.equal((await state()).tabs.length, beforePlain);
+  assert.equal((await state()).activeTab, plain.id);
+  passed('ordinary left-click still navigates in the current tab');
   await stop();
   console.log(`${checks} integration checks passed, 0 failed. Artifacts: ${profile}`);
 } finally {

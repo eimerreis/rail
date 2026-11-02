@@ -7,7 +7,7 @@ NSImage *RailSymbol(NSString *name, CGFloat size) {
   NSImage *image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
   return [image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightRegular]];
 }
-NSPasteboardType const RailTabPasteboardType = @"de.eimerreis.eimerrail.tab";
+NSPasteboardType const RailTabPasteboardType = @"de.eimerreis.rail.tab";
 void RailTitlebarDoubleClick(NSWindow *window) {
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   NSString *action = [defaults stringForKey:@"AppleActionOnDoubleClick"];
@@ -16,9 +16,16 @@ void RailTitlebarDoubleClick(NSWindow *window) {
   if ([action isEqualToString:@"Minimize"]) [window performMiniaturize:nil];
   else [window performZoom:nil];
 }
+NSArray<NSString *> *RailSpaceSymbols(void) {
+  return @[@"briefcase",@"house",@"book",@"square.grid.2x2",@"star",@"heart",@"bolt",@"flame",@"leaf",@"globe",@"hammer",@"wrench.and.screwdriver",@"terminal",@"chevron.left.forwardslash.chevron.right",@"paintbrush",@"graduationcap",@"cart",@"gamecontroller",@"music.note",@"camera",@"airplane",@"building.2",@"person.2",@"flag"];
+}
+NSString *RailSymbolTitle(NSString *symbol) {
+  NSDictionary *titles = @{@"square.grid.2x2":@"Grid",@"wrench.and.screwdriver":@"Tools",@"chevron.left.forwardslash.chevron.right":@"Code",@"music.note":@"Music",@"building.2":@"Office",@"person.2":@"People",@"graduationcap":@"Learning",@"gamecontroller":@"Games"};
+  return titles[symbol] ?: symbol.capitalizedString;
+}
 NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color) {
   NSTextField *field = [NSTextField labelWithString:text ?: @""];
-  field.font = [NSFont systemFontOfSize:size weight:weight];
+  field.font = RailFont(size, weight);
   field.textColor = color;
   field.lineBreakMode = NSLineBreakByTruncatingTail;
   return field;
@@ -81,8 +88,8 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
 - (instancetype)initWithFrame:(NSRect)frame {
   if ((self = [super initWithFrame:frame])) {
     self.bordered = NO; self.bezelStyle = NSBezelStyleRegularSquare;
-    self.font = [NSFont systemFontOfSize:12]; self.ink = RailColor(0x273445);
-    self.cornerRadius = 6; self.hoverFill = RailColor(0xe2e8ef); self.imageOpacity = 1; self.progress = -1;
+    self.font = RailFont(12, NSFontWeightRegular); self.ink = RailInk();
+    self.cornerRadius = 6; self.hoverFill = RailTint(RailRoleHover); self.imageOpacity = 1; self.progress = -1;
     self.target = self; self.action = @selector(invoke:);
     self.focusRingType = NSFocusRingTypeExterior;
   }
@@ -127,9 +134,10 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
   NSRect bounds = NSInsetRect(self.bounds, .5, .5);
   NSBezierPath *shape = [NSBezierPath bezierPathWithRoundedRect:bounds xRadius:self.cornerRadius yRadius:self.cornerRadius];
   NSColor *fill = (_hovered && self.enabled) ? (self.hoverFill ?: self.normalFill) : self.normalFill;
+  if (self.highlighted && self.enabled && (self.pressedFill || self.hoverFill)) fill = self.pressedFill ?: [self.hoverFill blendedColorWithFraction:.08 ofColor:self.ink ?: RailInk()];
   if (fill) { [fill setFill]; [shape fill]; }
   if (self.stroke) { [self.stroke setStroke]; shape.lineWidth = 1; [shape stroke]; }
-  if (self.window.firstResponder == self) { [RailColor(0x3976be) setStroke]; shape.lineWidth = 2; [shape stroke]; }
+  if (self.window.firstResponder == self) { [RailTint(RailRoleFocus) setStroke]; shape.lineWidth = 2; [shape stroke]; }
   NSColor *ink = self.enabled ? self.ink : [self.ink colorWithAlphaComponent:.4];
   NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
   style.lineBreakMode = NSLineBreakByTruncatingTail;
@@ -150,10 +158,10 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
     if (self.progress >= 0) {
       NSPoint center = NSMakePoint(NSMidX(frame), NSMidY(frame)); CGFloat radius = MAX(size.width, size.height) / 2 + 3;
       NSBezierPath *track = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2)];
-      [RailColor(0xd4dde5) setStroke]; track.lineWidth = 2; [track stroke];
+      [RailLine() setStroke]; track.lineWidth = 2; [track stroke];
       NSBezierPath *arc = [NSBezierPath bezierPath];
       [arc appendBezierPathWithArcWithCenter:center radius:radius startAngle:-90 endAngle:-90 + 360 * MIN(1, self.progress) clockwise:NO];
-      [RailColor(0x3976be) setStroke]; arc.lineWidth = 2; arc.lineCapStyle = NSLineCapStyleRound; [arc stroke];
+      [RailTint(RailRoleAccent) setStroke]; arc.lineWidth = 2; arc.lineCapStyle = NSLineCapStyleRound; [arc stroke];
     }
   }
   if (textWidth) {
@@ -219,19 +227,19 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
 - (void)drawRect:(NSRect)dirtyRect {
   (void)dirtyRect;
   NSBezierPath *panel = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,.5,.5) xRadius:10 yRadius:10];
-  [NSColor.whiteColor setFill]; [panel fill];
-  [RailColor(0xd4dde5) setStroke]; panel.lineWidth = 1; [panel stroke];
+  [RailTint(RailRoleRaised) setFill]; [panel fill];
+  [RailLine() setStroke]; panel.lineWidth = 1; [panel stroke];
   CGFloat width = self.bounds.size.width;
-  NSDictionary *titleAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:13], NSForegroundColorAttributeName:RailColor(0x273445)};
-  NSDictionary *detailAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:12], NSForegroundColorAttributeName:RailColor(0x596879)};
-  NSDictionary *selectedDetailAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:12], NSForegroundColorAttributeName:RailColor(0x245b96)};
+  NSDictionary *titleAttrs = @{NSFontAttributeName:RailFont(13, NSFontWeightRegular), NSForegroundColorAttributeName:RailInk()};
+  NSDictionary *detailAttrs = @{NSFontAttributeName:RailFont(12, NSFontWeightRegular), NSForegroundColorAttributeName:RailMuted()};
+  NSDictionary *selectedDetailAttrs = @{NSFontAttributeName:RailFont(12, NSFontWeightRegular), NSForegroundColorAttributeName:RailTint(RailRoleSelectedInk)};
   for (NSUInteger i = 0; i < self.suggestions.count; i++) {
     RailSuggestion *item = self.suggestions[i];
     NSRect row = NSMakeRect(RailSuggestionInset, RailSuggestionInset + i * RailSuggestionRow, width - RailSuggestionInset * 2, RailSuggestionRow);
     BOOL selected = (NSInteger)i == self.selectedIndex;
-    if (selected) { [RailColor(0xd8e7f7) setFill]; [[NSBezierPath bezierPathWithRoundedRect:row xRadius:6 yRadius:6] fill]; }
+    if (selected) { [RailTint(RailRoleSelected) setFill]; [[NSBezierPath bezierPathWithRoundedRect:row xRadius:6 yRadius:6] fill]; }
     NSImage *icon = item.icon;
-    if (icon && !item.iconKeepsColors) icon = [icon imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailColor(selected ? 0x245b96 : 0x596879)]]] ?: icon;
+    if (icon && !item.iconKeepsColors) icon = [icon imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[selected ? RailTint(RailRoleSelectedInk) : RailMuted()]]] ?: icon;
     if (icon) {
       NSSize size = icon.size; CGFloat scale = MIN(1, MIN(16 / MAX(size.width,1), 16 / MAX(size.height,1)));
       size = NSMakeSize(size.width * scale, size.height * scale);
@@ -259,6 +267,11 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
 @end
 
 @implementation RailAddressField
+// The placeholder follows the theme instead of the system's placeholder grey.
+- (void)setPlaceholderString:(NSString *)placeholder {
+  self.placeholderAttributedString = [[NSAttributedString alloc] initWithString:placeholder ?: @"" attributes:@{NSFontAttributeName:self.font ?: RailFont(13, NSFontWeightRegular), NSForegroundColorAttributeName:RailMuted()}];
+}
+- (NSString *)placeholderString { return self.placeholderAttributedString.string; }
 - (BOOL)becomeFirstResponder { BOOL became = [super becomeFirstResponder]; [self.bar syncFocusSoon]; return became; }
 - (void)mouseDown:(NSEvent *)event {
   // Like a browser: the first click selects the whole address, later clicks place the caret.
@@ -280,9 +293,9 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
 }
 - (instancetype)initWithFrame:(NSRect)frame {
   if ((self = [super initWithFrame:frame])) {
-    _icon = [[NSImageView alloc] init]; _icon.contentTintColor = RailColor(0x596879); [self addSubview:_icon];
+    _icon = [[NSImageView alloc] init]; _icon.contentTintColor = RailMuted(); [self addSubview:_icon];
     _field = [[RailAddressField alloc] init]; _field.bar = self;
-    _field.font = [NSFont systemFontOfSize:13]; _field.textColor = RailColor(0x273445);
+    _field.font = RailFont(13, NSFontWeightRegular); _field.textColor = RailInk();
     _field.bordered = NO; _field.bezeled = NO; _field.drawsBackground = NO; _field.focusRingType = NSFocusRingTypeNone;
     _field.usesSingleLineMode = YES; _field.cell.scrollable = YES; _field.cell.wraps = NO; _field.lineBreakMode = NSLineBreakByClipping;
     [self addSubview:_field];
@@ -330,11 +343,11 @@ static const CGFloat RailSuggestionRow = 34, RailSuggestionInset = 6;
   NSRect bounds = NSInsetRect(self.bounds, 1, 1);
   NSBezierPath *shape = [NSBezierPath bezierPathWithRoundedRect:bounds xRadius:8 yRadius:8];
   if (_focused) {
-    [NSColor.whiteColor setFill]; [shape fill];
-    [RailColor(0x3976be) setStroke]; shape.lineWidth = 2; [shape stroke];
+    [RailTint(RailRoleRaised) setFill]; [shape fill];
+    [RailTint(RailRoleFocus) setStroke]; shape.lineWidth = 2; [shape stroke];
   } else {
-    [(_hovered ? RailColor(0xe2e8ef) : self.restingFill ?: RailColor(0xe9eef3)) setFill]; [shape fill];
-    if (self.restingStroke) { [self.restingStroke setStroke]; shape.lineWidth = 1; [shape stroke]; }
+    [(_hovered ? RailTint(RailRoleFieldHover) : self.restingFill ?: RailTint(RailRoleField)) setFill]; [shape fill];
+    [(self.restingStroke ?: RailTint(_hovered ? RailRoleLineStrong : RailRoleLine)) setStroke]; shape.lineWidth = 1; [shape stroke];
   }
 }
 @end
@@ -384,26 +397,26 @@ static const CGFloat RailDownloadRowHeight = 46, RailDownloadInset = 6;
   (void)dirtyRect;
   CGFloat width = self.bounds.size.width;
   NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init]; style.lineBreakMode = NSLineBreakByTruncatingMiddle;
-  NSDictionary *titleAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium], NSForegroundColorAttributeName:RailColor(0x273445), NSParagraphStyleAttributeName:style};
-  NSDictionary *detailAttrs = @{NSFontAttributeName:[NSFont systemFontOfSize:11], NSForegroundColorAttributeName:RailColor(0x596879)};
+  NSDictionary *titleAttrs = @{NSFontAttributeName:RailFont(12.5, NSFontWeightMedium), NSForegroundColorAttributeName:RailInk(), NSParagraphStyleAttributeName:style};
+  NSDictionary *detailAttrs = @{NSFontAttributeName:RailDigitsFont(11, NSFontWeightRegular), NSForegroundColorAttributeName:RailMuted()};
   for (NSUInteger i = 0; i < self.rows.count; i++) {
     RailDownloadRow *item = self.rows[i];
     NSRect row = NSMakeRect(RailDownloadInset, RailDownloadInset + i * RailDownloadRowHeight, width - RailDownloadInset * 2, RailDownloadRowHeight);
-    if ((NSInteger)i == _hovered) { [RailColor(0xe2ebf5) setFill]; [[NSBezierPath bezierPathWithRoundedRect:row xRadius:7 yRadius:7] fill]; }
+    if ((NSInteger)i == _hovered) { [RailTint(RailRoleContentHover) setFill]; [[NSBezierPath bezierPathWithRoundedRect:row xRadius:7 yRadius:7] fill]; }
     if (item.icon) [item.icon drawInRect:NSMakeRect(NSMinX(row) + 8, NSMidY(row) - 14, 28, 28) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
     CGFloat textX = NSMinX(row) + 44, textWidth = NSWidth(row) - 44 - (item.accessorySymbol ? 36 : 10);
     [item.title ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 7, textWidth, 17) withAttributes:titleAttrs];
     if (item.progress >= 0) {
       NSRect track = NSMakeRect(textX, NSMinY(row) + 27, textWidth, 3);
-      [RailColor(0xd4dde5) setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
+      [RailLine() setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
       track.size.width *= MIN(1, item.progress);
-      [RailColor(0x3976be) setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
-      [item.detail ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 31, textWidth, 14) withAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10], NSForegroundColorAttributeName:RailColor(0x596879)}];
+      [RailTint(RailRoleAccent) setFill]; [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
+      [item.detail ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 31, textWidth, 14) withAttributes:@{NSFontAttributeName:RailDigitsFont(10, NSFontWeightRegular), NSForegroundColorAttributeName:RailMuted()}];
     } else {
       [item.detail ?: @"" drawInRect:NSMakeRect(textX, NSMinY(row) + 25, textWidth, 15) withAttributes:detailAttrs];
     }
     if (item.accessorySymbol && (NSInteger)i == _hovered) {
-      NSImage *symbol = [RailSymbol(item.accessorySymbol, 13) imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailColor(0x245b96)]]];
+      NSImage *symbol = [RailSymbol(item.accessorySymbol, 13) imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[RailTint(RailRoleAccent)]]];
       NSSize size = symbol.size;
       [symbol drawInRect:NSMakeRect(NSMaxX(row) - 22 - size.width / 2, NSMidY(row) - size.height / 2, size.width, size.height) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
     }

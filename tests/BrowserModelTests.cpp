@@ -235,6 +235,30 @@ void renamedPinnedTabKeepsItsName() {
     require(!model.renameTab("missing", "x"), "missing tab should be rejected");
 }
 
+void sidebarAnimationFallsBackToFull() {
+    rail::BrowserModel model;
+    require(model.state.sidebarAnimation == "full", "new layouts should animate the sidebar fully");
+    model.state.sidebarAnimation = "bouncy";
+    model.sanitize(1);
+    require(model.state.sidebarAnimation == "full", "unknown animations should fall back to full");
+    model.state.sidebarAnimation = "off";
+    model.sanitize(1);
+    require(model.state.sidebarAnimation == "off", "off should be kept");
+}
+void themeFallsBackToPorcelain() {
+    rail::BrowserModel model;
+    require(model.state.theme == "porcelain", "new layouts should use Porcelain");
+    for (const char* theme : {"porcelain", "nightline", "daylight"}) {
+        model.state.theme = theme;
+        model.sanitize(1);
+        require(model.state.theme == theme, "each named theme should be kept");
+    }
+    for (const char* theme : {"", "Nightline", "midnight", "dark"}) {
+        model.state.theme = theme;
+        model.sanitize(1);
+        require(model.state.theme == "porcelain", "missing or unknown themes should fall back to Porcelain");
+    }
+}
 void controlSizeFallsBackToSmall() {
     rail::BrowserModel model;
     require(model.state.controlSize == "small", "new layouts should use the small size");
@@ -579,6 +603,8 @@ int main(int argc, char** argv) {
         {"close-pinned", closingPinnedTabResetsItToItsPinnedPage},
         {"rename-pinned", renamedPinnedTabKeepsItsName},
         {"control-size", controlSizeFallsBackToSmall},
+        {"sidebar-animation", sidebarAnimationFallsBackToFull},
+        {"theme", themeFallsBackToPorcelain},
         {"reopen", closedTabsCanBeReopened},
         {"close-background", closingBackgroundTabPreservesSelection},
         {"move", movingTabsPreservesIdentity},

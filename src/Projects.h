@@ -96,8 +96,45 @@ struct PipelineRun {
     double finishedAt = 0;
 };
 
+// A required step on the way to merge: a build or status check, or (Azure DevOps) a branch policy.
+struct PullRequestCheck {
+    std::string kind;                // "build" | "policy"
+    std::string name;
+    std::string state;               // succeeded|failed|running|pending|skipped
+    std::string detail;
+    std::string url;
+    bool blocking = true;
+};
+
+struct PullRequestReviewer {
+    std::string name;
+    std::string vote;                // approved|waiting|rejected|none
+    bool required = false;
+};
+
+// One of the user's own open pull requests.
+struct PullRequest {
+    std::string id;                  // provider number
+    std::string title, url, sourceBranch, targetBranch;
+    bool draft = false, conflicts = false, autoComplete = false;
+    double createdAt = 0;
+    int openThreads = -1;            // -1 = unknown
+    std::vector<PullRequestCheck> checks;
+    std::vector<PullRequestReviewer> reviewers;
+    std::string detailsSHA;          // GitHub: the head commit whose checks apply
+};
+
+enum class PullRequestStage { needsYou, waiting, ready };
+// Overall state of the build checks: failed|running|pending|succeeded|none.
+std::string pullRequestChecks(const PullRequest& pr);
+PullRequestStage pullRequestStage(const PullRequest& pr);
+// A short reason for the stage, such as "billing-ci failed" or "1 of 2 approved".
+std::string pullRequestReason(const PullRequest& pr);
+
 struct SourceStatus {
     std::vector<PipelineRun> runs;   // latest run of each pipeline on the default branch, newest first
+    std::vector<PullRequest> myPullRequests; // open pull requests created by the connection's user
+    bool myPullRequestsKnown = false;
     int openPullRequests = -1;       // -1 = unknown
     std::string defaultBranch;
     std::string pullRequestsURL;
@@ -109,6 +146,7 @@ struct SourceStatus {
 struct ConnectionStatus {
     Access access = Access::unknown;
     std::string account;             // as the provider reports it
+    std::string userID;              // Azure DevOps: the signed-in identity, to find the user's own pull requests
     std::string error;
 };
 
@@ -124,6 +162,9 @@ constexpr int SlowMilliseconds = 1000;
 Health healthFromHTTP(int status, bool redirectedToOtherHost, int latencyMs);
 std::string azureBuildResult(const std::string& status, const std::string& result);
 std::string githubRunResult(const std::string& status, const std::string& conclusion);
+std::string githubCheckState(const std::string& status, const std::string& conclusion);
+std::string azurePolicyState(const std::string& status);
+std::string azureVote(int vote);
 // What an Azure DevOps response in a session says about its login.
 Access azureAccess(int status, const std::string& location, const std::string& mime, const std::string& displayName);
 

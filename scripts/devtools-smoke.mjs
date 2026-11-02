@@ -18,7 +18,7 @@ const url = `http://127.0.0.1:${fixture.address().port}/`;
 const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
 const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
 const log = openSync(resolve(profile, 'app.log'), 'a');
-const child = spawn(resolve(root, 'build/Release/Eimerrail.app/Contents/MacOS/Eimerrail'), [`--data-dir=${profile}`, '--automation', `--debug-port=${port}`], { stdio: ['ignore', log, log] });
+const child = spawn(resolve(root, 'build/Release/Rail.app/Contents/MacOS/Rail'), [`--data-dir=${profile}`, '--automation', `--debug-port=${port}`], { stdio: ['ignore', log, log] });
 closeSync(log);
 const exited = once(child, 'exit');
 let sequence = 0;
@@ -61,6 +61,20 @@ try {
   await until('fixture', async () => (await targets()).some(t => t.url === url && t.title === 'Inspect me'));
   const toggle = (window) => command('shortcut', { key: 'i', keyCode: 34, modifiers: ['cmd', 'alt'], window });
   const open = () => toggle();
+  // Docked by default: the inspector sits beside the page, which stays usable, and ⌥⌘I closes it again.
+  await open();
+  const docked = await until('Option-Command-I docks DevTools', async () => (await state()).devTools === 'docked' && (await devtools())[0], 6000);
+  await until('docked frontend loads', async () => (await cdp(docked, 'Runtime.evaluate', { expression: "document.readyState === 'complete'", returnByValue: true })).result.value);
+  assert.equal((await state()).tabs.length, initial.tabs.length, 'Docked DevTools must not become an ordinary tab');
+  await command('navigate', { url: `${url}?docked` });
+  await until('page navigates with DevTools docked', async () => (await targets()).some(t => t.url === `${url}?docked`));
+  await open();
+  await until('Option-Command-I closes docked DevTools', async () => !(await devtools()).length && (await state()).devTools === '');
+  await open(); await until('docked DevTools reopen', async () => (await state()).devTools === 'docked');
+  await command('menu', { title: 'Dock Developer Tools' });
+  await until('undocking moves DevTools into a window', async () => (await state()).devTools === 'window' && (await devtools()).length === 1);
+  await command('shortcut', { key: 'w', keyCode: 13, window: 'key' });
+  await until('undocked inspector closes', async () => !(await devtools()).length);
   await open();
   const first = await until('Option-Command-I opens DevTools', async () => (await devtools())[0], 6000);
   await until('DevTools frontend loads', async () => {
@@ -76,7 +90,7 @@ try {
   assert.equal(inspectorWindow.closeEnabled, true, 'The DevTools close button must be enabled');
   await command('closeWindow');
   await until('native close button closes inspector', async () => !(await devtools()).length);
-  assert.ok((await targets()).some(t => t.url === url), 'Closing DevTools must keep the inspected page');
+  assert.ok((await targets()).some(t => t.url.startsWith(url) && t.type === 'page'), 'Closing DevTools must keep the inspected page');
   await open();
   await until('inspector reopens after native close', async () => (await devtools()).length === 1);
   assert.equal((await command('focusMainWindow')).keyWindow.main, true, 'Focus the page before toggling DevTools');
@@ -90,7 +104,7 @@ try {
   await until('inspector reopens after focused toggle', async () => (await devtools()).length === 1);
   await command('shortcut', { key: 'w', keyCode: 13, window: 'key' });
   await until('inspector closes independently', async () => !(await devtools()).length);
-  assert.ok((await targets()).some(t => t.url === url), 'Closing DevTools must keep the inspected page');
+  assert.ok((await targets()).some(t => t.url.startsWith(url) && t.type === 'page'), 'Closing DevTools must keep the inspected page');
   await command('menu', { title: 'Developer Tools' });
   await until('inspector reopens', async () => (await devtools()).length === 1);
   await command('focusMainWindow');

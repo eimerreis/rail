@@ -1,8 +1,8 @@
-# Eimerrail — ink
+# Rail — ink
 
 Created 2026-10-29 using the built-in image generation tool.
 
-- `eimerrail-ink.png`: original calligraphic Eimerrail mark, warm ivory on near-black.
+- `rail-ink.png`: original calligraphic Rail mark, warm ivory on near-black.
 
 The source PNG is 1254 × 1254 pixels, opaque RGB square artwork. It is the selected app icon.
 
@@ -11,7 +11,7 @@ The source PNG is 1254 × 1254 pixels, opaque RGB square artwork. It is the sele
 ## Final prompt: ink icon
 
 Use case: logo-brand.
-Create ONE exceptional artistic app icon for Eimerrail, a personal browser. Finished square artwork, 1024 x 1024 or larger. Art direction: a confident abstract ink gesture, with the refinement of a modernist artist's personal stamp and the immediate silhouette of a great app icon.
+Create ONE exceptional artistic app icon for Rail, a personal browser. Finished square artwork, 1024 x 1024 or larger. Art direction: a confident abstract ink gesture, with the refinement of a modernist artist's personal stamp and the immediate silhouette of a great app icon.
 
 On a flat near-black background, one warm ivory calligraphic stroke sweeps up from the lower left, curls into a spacious asymmetric open loop, crosses once and sweeps out to the right. It should suggest a lowercase handwritten e, wandering and discovery, without being a literal typeset letter. This is a ribbon of ink with genuinely beautiful tension: a full broad curved belly, a narrow taper on the turn, a sharp expressive terminal, and a little dry-brush character confined to one edge. Large sculptural negative space within the loop. The stroke is fluid and human, emphatically not a mechanical spline. Two very small irregular ink droplets continue the final sweep, with generous spacing. Keep the droplets subordinate. The overall gesture is slightly rising, compact, and optically balanced. A tiny slender companion flick may sit inside the main gesture if it improves it, but no surrounding orbit.
 

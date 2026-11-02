@@ -1,11 +1,17 @@
 #import <Cocoa/Cocoa.h>
+#import "Theme.h"
 
+// A fixed sRGB colour, for identity colours that don't follow the theme; use RailTint for the shell.
 NSColor *RailColor(unsigned int hex);
+// A label in Rail's typeface.
 NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color);
 NSImage *RailSymbol(NSString *name, CGFloat size);
 extern NSPasteboardType const RailTabPasteboardType;
 // Zooms or minimizes the window as System Settings › Desktop & Dock asks for a title bar double-click.
 void RailTitlebarDoubleClick(NSWindow *window);
+// Icons offered for Spaces, with readable names; any other SF Symbol can be typed in.
+NSArray<NSString *> *RailSpaceSymbols(void);
+NSString *RailSymbolTitle(NSString *symbol);
 
 @interface RailPanel : NSView
 @property(nonatomic, strong) NSColor *fill;
@@ -33,6 +39,8 @@ void RailTitlebarDoubleClick(NSWindow *window);
 @property(nonatomic, strong) NSColor *hoverFill;
 @property(nonatomic, strong) NSColor *ink;
 @property(nonatomic, strong) NSColor *stroke;
+// Fill while pressed; by default the hover fill, slightly deepened toward the ink.
+@property(nonatomic, strong) NSColor *pressedFill;
 @property(nonatomic) BOOL centered;
 @property(nonatomic) CGFloat cornerRadius;
 // Bitmap images such as favicons keep their own colors instead of taking the ink color.

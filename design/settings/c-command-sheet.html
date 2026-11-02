@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Settings · C · Search-first sheet</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<style>
+/* ⌘ , drops a sheet from the toolbar, like the address suggestions: type to find a setting, change it in the row. */
+.win{position:relative}
+.article{width:600px;margin:46px auto 0;display:grid;gap:12px}
+.article h1{margin:0 0 6px;font:400 32px/1.15 Georgia,serif;letter-spacing:-.8px;color:#2b3440}
+.article p{margin:0;font:13px/1.8 Georgia,serif;color:#4a5562}
+.scrim{position:absolute;inset:51px 0 0 255px;background:rgba(39,52,69,.10)}
+
+.sheet{position:absolute;left:534px;top:46px;width:650px;border-radius:12px;background:#fff;overflow:hidden;
+  box-shadow:0 0 0 .5px rgba(30,40,52,.22),0 22px 50px -14px rgba(30,40,52,.34),0 6px 14px -6px rgba(30,40,52,.14)}
+.q{height:50px;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;border-bottom:1px solid var(--line-soft)}
+.q > svg{width:17px;height:17px;color:var(--sub)}
+.q .text{font-size:15px;letter-spacing:-.1px;display:flex;align-items:center}
+.q .caret{width:1.5px;height:19px;background:#3976be;margin-left:1px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.q .caret{animation:none}}
+.q .scope{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub)}
+.res{padding:6px 8px 4px;display:grid;gap:1px}
+.grp{font-size:11px;font-weight:600;color:var(--sub);padding:10px 10px 5px}
+.it{display:grid;grid-template-columns:22px 1fr auto;align-items:center;column-gap:10px;min-height:52px;padding:7px 10px;border-radius:8px}
+.it > svg{width:16px;height:16px;color:#52708a}
+.it .n{font-size:12.5px;font-weight:550}
+.it .d{font-size:11px;color:var(--sub);margin-top:3px}
+.it.focus{background:#eef4fb;box-shadow:inset 0 0 0 1px #c7daef}
+.it.focus > svg{color:var(--accent)}
+mark{background:var(--selected);color:var(--accent);border-radius:3px;padding:0 1px;margin:0 -1px}
+.seg.small span{height:22px;padding:0 9px;font-size:11px}
+.it.focus .seg{background:#dfe8f2}
+.fixed{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub)}
+.browse{border-top:1px solid var(--line-soft);padding:10px 12px 11px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.browse .lbl{font-size:11px;color:var(--sub);margin-right:4px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 8px;border-radius:7px;font-size:11px;background:#f3f6f9;color:var(--ink)}
+.chip svg{width:13px;height:13px;color:#52708a}
+.chip .c{width:10px;height:10px;color:#93a1af}
+.foot{display:flex;align-items:center;gap:16px;padding:0 14px;height:34px;background:#f7f9fb;border-top:1px solid var(--line-soft);font-size:11px;color:var(--sub)}
+.foot .k{display:inline-flex;align-items:center;gap:5px}
+.foot .first{margin-right:auto}
+.foot kbd{font-size:9.5px;padding:1px 4px}
+.live{position:absolute;left:534px;top:526px;width:650px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub);padding:0 4px}
+.live svg{width:13px;height:13px;color:var(--ok-dot)}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script src="icons.js"></script>
+<div class="win">
+  <nav class="rail" aria-hidden="true">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <span class="rail-btn current"><svg class="i"><use href="#work"/></svg></span>
+    <span class="rail-btn"><svg class="i"><use href="#home"/></svg></span>
+    <span class="rail-btn"><svg class="i"><use href="#book"/></svg></span>
+    <div class="rail-bottom"><span class="rail-btn"><svg class="i"><use href="#plus"/></svg></span><span class="rail-btn"><svg class="i"><use href="#sliders"/></svg></span></div>
+  </nav>
+  <aside class="sidebar" aria-hidden="true">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><span class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></span></div>
+    <div class="space-head">Work<span class="icon-btn"><svg class="i"><use href="#dots"/></svg></span></div>
+    <div class="space-desc">A little room for good work.</div>
+    <div class="rows"><div class="row"><span class="fav"><svg class="i"><use href="#grid"/></svg></span><span class="t">Work home</span></div></div>
+    <div class="sec">Pinned</div>
+    <div class="pins">
+      <div class="pin"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>DevOps</div>
+      <div class="pin"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>GitHub</div>
+    </div>
+    <div class="sec">Tabs</div>
+    <div class="rows">
+      <div class="row sel"><span class="fav"><svg class="i"><use href="#globe"/></svg></span><span class="t">Designing for one person</span><span class="mk">W</span></div>
+      <div class="row"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">PR 482 · Retry invoice export</span><span class="mk">W</span></div>
+      <div class="row"><span class="fav local"><svg class="i"><use href="#laptop"/></svg></span><span class="t">localhost:3000</span><span class="mk">W</span></div>
+      <div class="row asleep"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Sprint 41 board</span><span class="moon"><svg class="i"><use href="#moon"/></svg></span></div>
+    </div>
+    <div class="new-tab"><svg class="i"><use href="#plus"/></svg>New tab</div>
+    <div class="side-scroll"></div>
+    <div class="side-foot">1 asleep · after 10 min</div>
+  </aside>
+  <main class="content" aria-hidden="true">
+    <div class="toolbar">
+      <span class="icon-btn"><svg class="i"><use href="#back"/></svg></span><span class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></span><span class="icon-btn"><svg class="i"><use href="#reload"/></svg></span>
+      <div class="url"><svg class="i"><use href="#lock"/></svg><b>notes.example.org</b>/one-person-software</div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+    <div class="page"><div class="article">
+      <h1>Designing for one person</h1>
+      <p>Most software is written for a crowd. Writing it for a single, known person changes which questions matter: not what everyone might need, but what this one working day actually asks for.</p>
+      <p>The result is often smaller, and stranger, and much easier to love. It keeps the shortcuts its owner already knows and leaves out the rest.</p>
+    </div></div>
+    <div class="status"><span>Work session</span><span>Idle tabs unload after 10 min</span></div>
+  </main>
+  <div class="scrim"></div>
+
+  <section class="sheet" role="dialog" aria-label="Settings">
+    <div class="q"><svg class="i"><use href="#sliders"/></svg><span class="text">side<span class="caret"></span></span><span class="scope">All settings<kbd>esc</kbd></span></div>
+    <div class="res" role="listbox" aria-label="Matching settings">
+      <div class="grp">Appearance</div>
+      <div class="it focus" role="option" aria-selected="true"><svg class="i"><use href="#motion"/></svg>
+        <div><div class="n"><mark>Side</mark>bar animation</div><div class="d">How the sidebar and rail leave and return with ⌘ S</div></div>
+        <div class="seg small"><span>Off</span><span>Subtle</span><span class="on">Full</span></div></div>
+      <div class="it" role="option"><svg class="i"><use href="#appearance"/></svg>
+        <div><div class="n">Interface size</div><div class="d"><mark>Side</mark>bar, Spaces rail and Space home</div></div>
+        <div class="seg small"><span class="on">Small</span><span>Normal</span><span>Large</span></div></div>
+      <div class="grp">Developer</div>
+      <div class="it" role="option"><svg class="i"><use href="#dock"/></svg>
+        <div><div class="n">DevTools placement</div><div class="d">Docked be<mark>side</mark> the page, or in their own window · ⇧ ⌘ D</div></div>
+        <div class="seg small"><span class="on">Docked</span><span>Window</span></div></div>
+      <div class="grp">Keyboard</div>
+      <div class="it" role="option"><svg class="i"><use href="#sidebar"/></svg>
+        <div><div class="n">Hide or show the <mark>side</mark>bar</div><div class="d">Also the button at the top of the sidebar</div></div>
+        <div class="fixed"><kbd>⌘ S</kbd></div></div>
+    </div>
+    <div class="browse"><span class="lbl">Or open</span>
+      <span class="chip"><svg class="i"><use href="#tabs"/></svg>Tabs</span>
+      <span class="chip"><svg class="i"><use href="#spaces"/></svg>Spaces<svg class="i c"><use href="#fwd"/></svg></span>
+      <span class="chip"><svg class="i"><use href="#session"/></svg>Sessions<svg class="i c"><use href="#fwd"/></svg></span>
+      <span class="chip"><svg class="i"><use href="#link2"/></svg>Link rules<svg class="i c"><use href="#fwd"/></svg></span>
+      <span class="chip"><svg class="i"><use href="#grid"/></svg>Projects<svg class="i c"><use href="#fwd"/></svg></span>
+      <span class="chip"><svg class="i"><use href="#key"/></svg>Connections<svg class="i c"><use href="#fwd"/></svg></span>
+      <span class="chip"><svg class="i"><use href="#compass"/></svg>Default browser</span>
+    </div>
+    <div class="foot"><span class="first">4 settings match</span><span class="k"><kbd>↑</kbd><kbd>↓</kbd>Move</span><span class="k"><kbd>←</kbd><kbd>→</kbd>Change</span><span class="k"><kbd>↩</kbd>Open</span><span class="k"><kbd>esc</kbd>Close</span></div>
+  </section>
+  <div class="live"><svg class="i"><use href="#check"/></svg>Changes apply as you make them. Press ⌘ S with the sheet open to try the animation.</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Settings · B · Settings window</title>
+<link rel="stylesheet" href="../project-overview/shell.css">
+<style>
+/* The browser stays behind as the inactive window; Settings is its own macOS window (⌘ ,). */
+.win{position:relative}
+.behind .traffic span{background:#d6dbe0;box-shadow:inset 0 0 0 .5px #c3cad1}
+.article{width:600px;margin:46px auto 0;display:grid;gap:12px}
+.article h1{margin:0 0 6px;font:400 32px/1.15 Georgia,serif;letter-spacing:-.8px;color:#2b3440}
+.article p{margin:0;font:13px/1.8 Georgia,serif;color:#4a5562}
+
+.prefs{position:absolute;left:330px;top:120px;width:800px;height:600px;display:flex;border-radius:13px;overflow:hidden;background:#fff;
+  box-shadow:0 0 0 .5px rgba(30,40,52,.28),0 24px 60px -12px rgba(30,40,52,.38),0 8px 18px -6px rgba(30,40,52,.16)}
+.p-side{width:214px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.p-side .side-top{height:52px}
+.p-find{margin:0 10px 10px;height:28px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:7px;background:#e2e8ef;font-size:12px;color:#55606d}
+.p-find svg{width:13px;height:13px}
+.p-list{padding:0 8px;display:grid;gap:1px}
+.p-gap{height:12px}
+.p-item{display:flex;align-items:center;gap:9px;height:30px;padding:0 8px;border-radius:7px;font-size:12px;white-space:nowrap}
+.p-item.sel{background:var(--accent-strong);color:#fff}
+.tile{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:#fff;flex-shrink:0}
+.tile svg{width:13px;height:13px}
+.t-slate{background:#587089}.t-blue{background:#4173aa}.t-ink{background:#2d3b4d}.t-teal{background:#3f7d84}
+.t-green{background:#476d4e}.t-brown{background:#7a5838}.t-violet{background:#6b4fa6}.t-steel{background:#35618e}
+.p-item.sel .tile{box-shadow:0 0 0 1px rgba(255,255,255,.55)}
+
+.p-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.p-title{height:52px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 20px;font-size:13px;font-weight:650;border-bottom:1px solid var(--line-soft)}
+.p-title .nav{display:flex;gap:2px;color:#a7b3bf}
+.p-title .nav svg{width:15px;height:15px}
+.p-body{flex:1;overflow:hidden;padding:18px 22px 0;background:#f7f9fb}
+.intro{font-size:11.5px;color:var(--sub);margin:0 2px 12px;line-height:1.5}
+.inset{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sp{display:flex;align-items:center;gap:11px;height:48px;padding:0 12px}
+.sp + .sp,.sp + .detail,.detail + .sp{border-top:1px solid var(--line-soft)}
+.sp .ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--rail);color:#55697e}
+.sp .ico svg{width:16px;height:16px}
+.sp.open .ico{background:var(--accent-strong);color:#fff}
+.sp .nm{font-size:12.5px;font-weight:600;min-width:90px}
+.sp .meta{flex:1;display:flex;align-items:center;gap:14px;font-size:11px;color:var(--sub)}
+.sp .meta span{display:inline-flex;align-items:center;gap:6px}
+.sp .chev svg{width:13px;height:13px;color:#93a1af}
+.sp.open .chev svg{transform:rotate(90deg)}
+.detail{padding:4px 12px 14px 53px;display:grid;grid-template-columns:150px 1fr;row-gap:12px;align-items:center;font-size:11.5px}
+.detail .k{color:var(--sub)}
+.field{height:26px;width:220px;display:flex;align-items:center;padding:0 8px;border-radius:6px;border:1px solid #c9d3dd;background:#fff;font-size:12px;box-shadow:0 0 0 3px rgba(57,118,190,.18);border-color:#3976be}
+.icons{display:flex;gap:4px}
+.icons span{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:#55697e;background:#f1f4f7}
+.icons span.on{background:var(--accent-strong);color:#fff}
+.icons svg{width:14px;height:14px}
+.popup{height:24px;display:inline-flex;align-items:center;gap:7px;padding:0 6px 0 7px;border-radius:6px;background:#fff;font-size:12px;box-shadow:0 0 0 .5px rgba(39,52,69,.25),0 1px 2px rgba(39,52,69,.12)}
+.popup svg{width:10px;height:10px;color:var(--sub)}
+.rules{align-self:start}
+.table{border:1px solid #d3dbe3;border-radius:6px;overflow:hidden;width:330px;background:#fff}
+.table .r{height:26px;display:flex;align-items:center;padding:0 9px;font:11px/1 var(--mono);color:var(--ink);letter-spacing:-.01em}
+.table .r:nth-child(even){background:#f5f8fb}
+.table .r.sel{background:#d8e7f7}
+.table .bar{display:flex;border-top:1px solid #d3dbe3;background:#fafbfc}
+.table .bar span{width:26px;height:22px;display:grid;place-items:center;border-right:1px solid #e1e7ed;color:#4b5a6a}
+.table .bar svg{width:11px;height:11px}
+.hint{grid-column:2;font-size:11px;color:var(--sub);margin-top:-4px}
+.p-foot{display:flex;align-items:center;gap:10px;padding:14px 2px}
+.p-foot .btn{height:26px}
+.p-foot span{font-size:11px;color:var(--sub)}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script src="icons.js"></script>
+<div class="win">
+  <nav class="rail" aria-hidden="true">
+    <div class="logo"><svg class="i"><use href="#stack"/></svg></div>
+    <span class="rail-btn current"><svg class="i"><use href="#work"/></svg></span>
+    <span class="rail-btn"><svg class="i"><use href="#home"/></svg></span>
+    <span class="rail-btn"><svg class="i"><use href="#book"/></svg></span>
+    <div class="rail-bottom"><span class="rail-btn"><svg class="i"><use href="#plus"/></svg></span><span class="rail-btn"><svg class="i"><use href="#sliders"/></svg></span></div>
+  </nav>
+  <aside class="sidebar behind" aria-hidden="true">
+    <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div><span class="icon-btn"><svg class="i"><use href="#sidebar"/></svg></span></div>
+    <div class="space-head">Work<span class="icon-btn"><svg class="i"><use href="#dots"/></svg></span></div>
+    <div class="space-desc">A little room for good work.</div>
+    <div class="rows"><div class="row"><span class="fav"><svg class="i"><use href="#grid"/></svg></span><span class="t">Work home</span></div></div>
+    <div class="sec">Pinned</div>
+    <div class="pins">
+      <div class="pin"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span>DevOps</div>
+      <div class="pin"><span class="fav gh"><svg class="i"><use href="#github"/></svg></span>GitHub</div>
+    </div>
+    <div class="sec">Tabs</div>
+    <div class="rows">
+      <div class="row sel"><span class="fav"><svg class="i"><use href="#globe"/></svg></span><span class="t">Designing for one person</span><span class="mk">W</span></div>
+      <div class="row"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">PR 482 · Retry invoice export</span><span class="mk">W</span></div>
+      <div class="row asleep"><span class="fav ado"><svg class="i"><use href="#ado"/></svg></span><span class="t">Sprint 41 board</span><span class="moon"><svg class="i"><use href="#moon"/></svg></span></div>
+    </div>
+    <div class="side-scroll"></div>
+    <div class="side-foot">1 asleep · after 10 min</div>
+  </aside>
+  <main class="content" aria-hidden="true">
+    <div class="toolbar">
+      <span class="icon-btn"><svg class="i"><use href="#back"/></svg></span><span class="icon-btn dim"><svg class="i"><use href="#fwd"/></svg></span><span class="icon-btn"><svg class="i"><use href="#reload"/></svg></span>
+      <div class="url"><svg class="i"><use href="#lock"/></svg><b>notes.example.org</b>/one-person-software</div>
+      <div class="session"><span class="sdot"></span>Work<svg class="i"><use href="#updown"/></svg></div>
+    </div>
+    <div class="page"><div class="article">
+      <h1>Designing for one person</h1>
+      <p>Most software is written for a crowd. Writing it for a single, known person changes which questions matter: not what everyone might need, but what this one working day actually asks for.</p>
+      <p>The result is often smaller, and stranger, and much easier to love. It keeps the shortcuts its owner already knows and leaves out the rest.</p>
+    </div></div>
+    <div class="status"><span>Work session</span><span>Idle tabs unload after 10 min</span></div>
+  </main>
+
+  <section class="prefs" role="dialog" aria-label="Rail Settings">
+    <aside class="p-side">
+      <div class="side-top"><div class="traffic"><span></span><span></span><span></span></div></div>
+      <div class="p-find"><svg class="i"><use href="#search"/></svg>Search</div>
+      <div class="p-list">
+        <div class="p-item"><span class="tile t-slate"><svg class="i"><use href="#appearance"/></svg></span>Appearance</div>
+        <div class="p-item"><span class="tile t-blue"><svg class="i"><use href="#tabs"/></svg></span>Tabs</div>
+        <div class="p-item"><span class="tile t-ink"><svg class="i"><use href="#wrench"/></svg></span>Developer</div>
+        <div class="p-item"><span class="tile t-teal"><svg class="i"><use href="#compass"/></svg></span>Default Browser</div>
+        <div class="p-gap"></div>
+        <div class="p-item sel"><span class="tile t-steel"><svg class="i"><use href="#spaces"/></svg></span>Spaces</div>
+        <div class="p-item"><span class="tile t-green"><svg class="i"><use href="#session"/></svg></span>Sessions</div>
+        <div class="p-item"><span class="tile t-brown"><svg class="i"><use href="#link2"/></svg></span>Link Rules</div>
+        <div class="p-gap"></div>
+        <div class="p-item"><span class="tile t-violet"><svg class="i"><use href="#grid"/></svg></span>Projects</div>
+        <div class="p-item"><span class="tile t-ink"><svg class="i"><use href="#key"/></svg></span>Connections</div>
+      </div>
+    </aside>
+    <div class="p-main">
+      <div class="p-title"><span class="nav"><svg class="i"><use href="#back"/></svg><svg class="i"><use href="#fwd"/></svg></span>Spaces</div>
+      <div class="p-body">
+        <p class="intro">Each Space has its own tabs, pins and home. New tabs use the Space's default session; links that match its rules open here from anywhere.</p>
+        <div class="inset">
+          <div class="sp open"><span class="ico"><svg class="i"><use href="#work"/></svg></span><span class="nm">Work</span><span class="meta"><span><span class="mk">W</span>Work session</span><span>3 link rules</span><span>12 tabs</span></span><span class="chev"><svg class="i"><use href="#fwd"/></svg></span></div>
+          <div class="detail">
+            <span class="k">Name</span><span class="field">Work</span>
+            <span class="k">Icon</span>
+            <span class="icons"><span class="on"><svg class="i"><use href="#work"/></svg></span><span><svg class="i"><use href="#home"/></svg></span><span><svg class="i"><use href="#book"/></svg></span><span><svg class="i"><use href="#grid"/></svg></span><span><svg class="i"><use href="#terminal"/></svg></span><span><svg class="i"><use href="#flask"/></svg></span><span><svg class="i"><use href="#heart"/></svg></span><span><svg class="i"><use href="#globe"/></svg></span><span><svg class="i"><use href="#dots"/></svg></span></span>
+            <span class="k">Session for new tabs</span><span><span class="popup"><span class="mk">W</span>Work<svg class="i"><use href="#updown"/></svg></span></span>
+            <span class="k rules">Links that open here</span>
+            <div class="table">
+              <div class="r">dev.azure.com/contoso</div>
+              <div class="r sel">*.contoso.dev</div>
+              <div class="r">portal.azure.com</div>
+              <div class="bar"><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#minus"/></svg></span></div>
+            </div>
+            <span class="hint">One address pattern per row. <span class="mono">*</span> matches any subdomain.</span>
+          </div>
+          <div class="sp"><span class="ico"><svg class="i"><use href="#home"/></svg></span><span class="nm">Personal</span><span class="meta"><span><span class="mk p">P</span>Personal session</span><span>1 link rule</span><span>6 tabs</span></span><span class="chev"><svg class="i"><use href="#fwd"/></svg></span></div>
+          <div class="sp"><span class="ico"><svg class="i"><use href="#book"/></svg></span><span class="nm">Research</span><span class="meta"><span><span class="mk">W</span>Work session</span><span>No link rules</span><span>4 tabs</span></span><span class="chev"><svg class="i"><use href="#fwd"/></svg></span></div>
+        </div>
+        <div class="p-foot"><button class="btn line"><svg class="i"><use href="#plus"/></svg>New Space</button><span>Spaces appear in the rail in this order.</span></div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

@@ -8,7 +8,7 @@ if [[ "${1:-}" == --no-build ]]; then
 else
   "$ROOT/scripts/build.sh"
 fi
-APP="$ROOT/build/$BUILD_TYPE/Eimerrail.app"
+APP="$ROOT/build/$BUILD_TYPE/Rail.app"
 if [[ ! -d "$APP" ]]; then
   echo "App is missing: $APP. Run scripts/build.sh first." >&2
   exit 1

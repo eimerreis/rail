@@ -174,6 +174,56 @@ void attentionIsComputed() {
     require(items.size() == 2 && items[1].action == "signIn" && items[1].title == "Sign in to Azure DevOps", "signed out hides runs and asks to sign in");
 }
 
+void pullRequestsAreStaged() {
+    using rail::PullRequestStage;
+    auto check = [](std::string kind, std::string name, std::string state, bool blocking = true) {
+        rail::PullRequestCheck c; c.kind = kind; c.name = name; c.state = state; c.blocking = blocking; return c;
+    };
+    auto reviewer = [](std::string name, std::string vote, bool required = false) {
+        rail::PullRequestReviewer r; r.name = name; r.vote = vote; r.required = required; return r;
+    };
+
+    // Azure DevOps: policies decide readiness.
+    rail::PullRequest azure;
+    azure.checks = {check("build", "billing-ci", "failed"), check("policy", "Minimum number of reviewers", "pending")};
+    azure.reviewers = {reviewer("Jana Lind", "approved", true), reviewer("Rui Sato", "none", true)};
+    require(rail::pullRequestChecks(azure) == "failed", "a failed build fails the checks");
+    require(rail::pullRequestStage(azure) == PullRequestStage::needsYou, "failed checks need the author");
+    require(rail::pullRequestReason(azure) == "billing-ci failed", "names the failed check");
+    azure.checks[0].state = "running";
+    require(rail::pullRequestStage(azure) == PullRequestStage::waiting && rail::pullRequestReason(azure) == "Checks running", "running checks wait");
+    azure.checks[0].state = "succeeded";
+    require(rail::pullRequestReason(azure) == "1 of 2 approved", "counts approvals while reviews are pending");
+    azure.checks[1].state = "succeeded"; azure.reviewers[1].vote = "approved";
+    require(rail::pullRequestStage(azure) == PullRequestStage::ready && rail::pullRequestReason(azure) == "Ready to merge", "all policies pass");
+    azure.openThreads = 2;
+    require(rail::pullRequestStage(azure) == PullRequestStage::needsYou && rail::pullRequestReason(azure) == "2 open threads", "open threads need the author");
+    azure.openThreads = 0; azure.reviewers[1].vote = "waiting";
+    require(rail::pullRequestReason(azure) == "Rui Sato is waiting for you", "waiting for author");
+    azure.reviewers[1].vote = "approved"; azure.conflicts = true;
+    require(rail::pullRequestStage(azure) == PullRequestStage::needsYou && rail::pullRequestReason(azure) == "Merge conflicts", "conflicts come first");
+    azure.conflicts = false; azure.checks.push_back(check("policy", "Work item linking", "failed", false));
+    require(rail::pullRequestStage(azure) == PullRequestStage::ready, "optional policies don't block");
+
+    // GitHub: no policies, so an approval is required.
+    rail::PullRequest github;
+    github.checks = {check("build", "test", "succeeded"), check("build", "lint", "skipped")};
+    require(rail::pullRequestStage(github) == PullRequestStage::waiting && rail::pullRequestReason(github) == "Needs review", "no review yet");
+    github.reviewers = {reviewer("an", "approved")};
+    require(rail::pullRequestStage(github) == PullRequestStage::ready, "approved and green");
+    github.draft = true;
+    require(rail::pullRequestStage(github) == PullRequestStage::waiting && rail::pullRequestReason(github) == "Draft", "drafts wait");
+    github.draft = false; github.reviewers.push_back(reviewer("jl", "rejected"));
+    require(rail::pullRequestStage(github) == PullRequestStage::needsYou && rail::pullRequestReason(github) == "jl requested changes", "changes requested");
+    require(rail::pullRequestChecks(rail::PullRequest{}) == "none", "no checks");
+
+    require(rail::azurePolicyState("approved") == "succeeded" && rail::azurePolicyState("rejected") == "failed" && rail::azurePolicyState("broken") == "failed"
+        && rail::azurePolicyState("running") == "running" && rail::azurePolicyState("queued") == "pending" && rail::azurePolicyState("notApplicable") == "skipped", "policy states");
+    require(rail::azureVote(10) == "approved" && rail::azureVote(5) == "approved" && rail::azureVote(-5) == "waiting" && rail::azureVote(-10) == "rejected" && rail::azureVote(0) == "none", "votes");
+    require(rail::githubCheckState("completed", "skipped") == "skipped" && rail::githubCheckState("completed", "failure") == "failed"
+        && rail::githubCheckState("in_progress", "") == "running" && rail::githubCheckState("queued", "") == "pending", "check runs");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -187,6 +237,7 @@ int main(int argc, char** argv) {
         {"sanitize", sanitizeRepairsProjects},
         {"status", mapsStatus},
         {"attention", attentionIsComputed},
+        {"pull-requests", pullRequestsAreStaged},
     };
     unsigned passed = 0, failed = 0;
     for (const auto& test : tests) {
