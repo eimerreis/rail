@@ -1053,7 +1053,16 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)goBack:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) if (browser->CanGoBack()) browser->GoBack(); }
 - (void)goForward:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) if (browser->CanGoForward()) browser->GoForward(); }
 - (void)reloadPage:(id)sender { (void)sender; if (_readingVisible) { [_reading reloadSelected]; return; } if (auto browser=[self activeBrowser]) { auto &slot=_runtime.at(_model.state.activeTabID); slot.error.clear(); browser->Reload(); [self refresh]; } else [self ensureBrowser:_model.state.activeTabID]; }
-- (void)showDevTools:(id)sender { (void)sender; if (!_homeVisible && !_readingVisible && !_quitting) ShowRailDevTools([self activeBrowser]); }
+- (void)showDevTools:(id)sender {
+  (void)sender; if (_quitting) return;
+  // A focused inspector may belong to a tab other than the selected one.
+  if (NSApp.keyWindow && NSApp.keyWindow!=_window) { [NSApp.keyWindow performClose:nil]; return; }
+  if (_homeVisible || _readingVisible) return;
+  if (auto browser=[self activeBrowser]) {
+    if (browser->GetHost()->HasDevTools()) browser->GetHost()->CloseDevTools();
+    else ShowRailDevTools(browser);
+  }
+}
 - (void)zoomIn:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()+.5); }
 - (void)zoomOut:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(browser->GetHost()->GetZoomLevel()-.5); }
 - (void)zoomReset:(id)sender { (void)sender; if (auto browser=[self activeBrowser]) browser->GetHost()->SetZoomLevel(0); }
@@ -1067,8 +1076,11 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   // Releasing Ctrl commits the tab chosen in the switcher.
   if (event.type==NSEventTypeFlagsChanged) { if (!_switcherTabs.empty() && !(flags & NSEventModifierFlagControl)) [self finishTabSwitch:YES]; return NO; }
   if (event.type!=NSEventTypeKeyDown || _window.attachedSheet) return NO;
-  // Let the inspector handle its own editing, reload and window shortcuts.
-  if (event.window && event.window!=_window) return NO;
+  // Toggle a focused inspector without routing its other shortcuts to the page.
+  if (event.window && event.window!=_window) {
+    if ((flags & NSEventModifierFlagCommand) && (flags & NSEventModifierFlagOption) && !(flags & NSEventModifierFlagShift) && [event.charactersIgnoringModifiers.lowercaseString isEqual:@"i"]) { [event.window performClose:nil]; return YES; }
+    return NO;
+  }
   if (event.keyCode==48 && (flags & NSEventModifierFlagControl) && !(flags & NSEventModifierFlagCommand)) { [self cycleRecentTabs:(flags & NSEventModifierFlagShift) ? -1 : 1]; return YES; }
   if (!_switcherTabs.empty() && event.keyCode==53) { [self finishTabSwitch:NO]; return YES; }
   if (!(flags & NSEventModifierFlagCommand)) { _undoCloseArmed=NO; return NO; }
@@ -1692,7 +1704,7 @@ static ProjectTone RunTone(const std::string &result) {
   [self newProjectWithURL:active->url session:active->sessionID];
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
-  if (item.action==@selector(showDevTools:)) return !_quitting && !_homeVisible && [self activeBrowser]!=nullptr;
+  if (item.action==@selector(showDevTools:)) return !_quitting && ((NSApp.keyWindow && NSApp.keyWindow!=_window) || (!_homeVisible && !_readingVisible && [self activeBrowser]!=nullptr));
   if (item.action==@selector(addCurrentPageAsProject:)) { const auto *active=_model.tab(_model.state.activeTabID); return active && rail::recognizeRepo(active->url); }
   return YES;
 }
@@ -1939,6 +1951,8 @@ static ProjectTone RunTone(const std::string &result) {
       NSEvent *event=[NSEvent keyEventWithType:release ? NSEventTypeFlagsChanged : NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:targetWindow.windowNumber context:nil characters:release ? @"" : key charactersIgnoringModifiers:release ? @"" : key isARepeat:NO keyCode:release ? 59 : keyCode];
       [NSApp sendEvent:event];
     }
+    else if ([action isEqual:@"focusMainWindow"]) [_window makeKeyAndOrderFront:nil];
+    else if ([action isEqual:@"closeWindow"]) [[NSApp.keyWindow standardWindowButton:NSWindowCloseButton] performClick:nil];
     else if ([action isEqual:@"capture"]) {
       [_window displayIfNeeded];
       NSMutableString *hierarchy=[NSMutableString stringWithFormat:@"Window %ld %@\nRoot %@\n",(long)_window.windowNumber,NSStringFromRect(_window.frame),_root];
@@ -1976,6 +1990,8 @@ static ProjectTone RunTone(const std::string &result) {
   }
 }
 - (void)writeAutomationState {
+  NSWindow *keyWindow=NSApp.keyWindow;
+  NSDictionary *windowState=@{@"main":@(keyWindow==_window),@"closable":@((keyWindow.styleMask & NSWindowStyleMaskClosable)!=0),@"closeEnabled":@([keyWindow standardWindowButton:NSWindowCloseButton].enabled)};
   NSMutableArray *tabs=[NSMutableArray array];
   for (const auto &tab:_model.state.tabs) { auto it=_runtime.find(tab.id); [tabs addObject:@{@"id":S(tab.id),@"url":S(tab.url),@"title":S(tab.title),@"session":S(tab.sessionID),@"space":S(tab.spaceID),@"pinned":@(tab.pinned),@"loaded":@(it!=_runtime.end() && it->second.browser.get()!=nullptr),@"closing":@(it!=_runtime.end() && it->second.closeReason!=CloseReason::None),@"error":it!=_runtime.end() ? S(it->second.error) : @""}]; }
   NSMutableArray *projects=[NSMutableArray array]; const auto &status=[_status snapshot];
@@ -1986,7 +2002,7 @@ static ProjectTone RunTone(const std::string &result) {
   }
   NSMutableArray *sheetText=[NSMutableArray array];
   if (NSView *content=_window.attachedSheet.contentView) { NSMutableArray<NSView *> *queue=[NSMutableArray arrayWithObject:content]; while (queue.count) { NSView *v=queue.firstObject; [queue removeObjectAtIndex:0]; [queue addObjectsFromArray:v.subviews]; if ([v isKindOfClass:NSTextField.class] && ((NSTextField *)v).stringValue.length) [sheetText addObject:((NSTextField *)v).stringValue]; if ([v isKindOfClass:NSButton.class]) [sheetText addObject:[@"[" stringByAppendingFormat:@"%@]",((NSButton *)v).title]]; } }
-  NSDictionary *snapshot=@{@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
+  NSDictionary *snapshot=@{@"keyWindow":windowState,@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
   [[NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
 }
 @end

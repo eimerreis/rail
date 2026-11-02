@@ -59,7 +59,8 @@ try {
   assert.equal((await devtools()).length, 0, 'Blank tabs have no page to inspect');
   const initial = await command('newTab', { url });
   await until('fixture', async () => (await targets()).some(t => t.url === url && t.title === 'Inspect me'));
-  const open = () => command('shortcut', { key: 'i', keyCode: 34, modifiers: ['cmd', 'alt'] });
+  const toggle = (window) => command('shortcut', { key: 'i', keyCode: 34, modifiers: ['cmd', 'alt'], window });
+  const open = () => toggle();
   await open();
   const first = await until('Option-Command-I opens DevTools', async () => (await devtools())[0], 6000);
   await until('DevTools frontend loads', async () => {
@@ -68,13 +69,36 @@ try {
   });
   assert.equal((await state()).tabs.length, initial.tabs.length, 'DevTools must not become an ordinary tab');
   assert.equal((await state()).activeTab, initial.activeTab);
+  const inspectorWindow = await until('DevTools is the key window', async () => {
+    const s = await state(); return !s.keyWindow.main && s.keyWindow;
+  });
+  assert.equal(inspectorWindow.closable, true, 'DevTools must have a native close control');
+  assert.equal(inspectorWindow.closeEnabled, true, 'The DevTools close button must be enabled');
+  await command('closeWindow');
+  await until('native close button closes inspector', async () => !(await devtools()).length);
+  assert.ok((await targets()).some(t => t.url === url), 'Closing DevTools must keep the inspected page');
   await open();
-  assert.deepEqual((await devtools()).map(t => t.id), [first.id], 'Reopening must reuse the existing inspector');
+  await until('inspector reopens after native close', async () => (await devtools()).length === 1);
+  assert.equal((await command('focusMainWindow')).keyWindow.main, true, 'Focus the page before toggling DevTools');
+  await open();
+  await until('shortcut toggles inspector closed', async () => !(await devtools()).length);
+  await open();
+  await until('inspector reopens after toggle', async () => (await devtools()).length === 1);
+  await toggle('key');
+  await until('shortcut closes focused inspector', async () => !(await devtools()).length);
+  await open();
+  await until('inspector reopens after focused toggle', async () => (await devtools()).length === 1);
   await command('shortcut', { key: 'w', keyCode: 13, window: 'key' });
   await until('inspector closes independently', async () => !(await devtools()).length);
   assert.ok((await targets()).some(t => t.url === url), 'Closing DevTools must keep the inspected page');
   await command('menu', { title: 'Developer Tools' });
   await until('inspector reopens', async () => (await devtools()).length === 1);
+  await command('focusMainWindow');
+  await command('menu', { title: 'Developer Tools' });
+  await until('menu toggles inspector closed', async () => !(await devtools()).length);
+  assert.equal((await state()).activeTab, initial.activeTab, 'Closing DevTools must keep the selected tab');
+  await command('menu', { title: 'Developer Tools' });
+  await until('inspector reopens after menu toggle', async () => (await devtools()).length === 1);
   await command('close');
   await until('closing inspected tab closes inspector', async () => !(await devtools()).length && !(await state()).tabs.some(t => t.id === initial.activeTab));
   const next = await command('newTab', { url });
@@ -85,7 +109,7 @@ try {
   let timer;
   try { const [code] = await Promise.race([exited, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Quit hung with DevTools open')), 15000); })]); assert.equal(code, 0); }
   finally { clearTimeout(timer); }
-  console.log(`DevTools integration passed: blank tab, shortcut, loaded frontend, reuse, native Cmd+W, menu reopen, tab cleanup, clean quit. Artifacts: ${profile}`);
+  console.log(`DevTools integration passed: blank tab, loaded frontend, native close button, shortcut toggle from page and inspector, Cmd+W, menu toggle, tab cleanup, clean quit. Artifacts: ${profile}`);
 } finally {
   if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
   await new Promise(resolve => fixture.close(resolve));

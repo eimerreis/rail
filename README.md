@@ -35,7 +35,7 @@ The selection stays in the local CMake cache. This workspace is already configur
 | Reload | **⌘ R** |
 | Back / forward | **⌘ [** / **⌘ ]** |
 | Find in page | **⌘ F** |
-| Open Chromium DevTools for the current page | **⌥ ⌘ I** or View → Developer Tools |
+| Open / close Chromium DevTools for the current page | **⌥ ⌘ I** or View → Developer Tools; **⌘ W** closes the focused inspector |
 | Inspect a page element | Right-click the page → Inspect Element |
 | Select a tab in the current Space | **⌘ 1–9** |
 | Switch to recently used tabs | Hold **⌃** and press **Tab** (**⇧** to go back); release **⌃** to switch |
@@ -107,7 +107,7 @@ Startup loads only the selected page. Other tabs remain unloaded until selected.
 ```sh
 ./scripts/build.sh             # Release build, bundle signatures, model + persistence tests
 node scripts/smoke-test.mjs     # Node 22+: actual native app + Chromium integration checks
-node scripts/devtools-smoke.mjs # DevTools opening, reuse, closing and lifecycle
+node scripts/devtools-smoke.mjs # DevTools close button, shortcut/menu toggles and lifecycle
 node scripts/projects-smoke.mjs # Space home, health checks, sign-in states, opening environments
 ```
 
