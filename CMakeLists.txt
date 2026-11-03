@@ -170,7 +170,11 @@ find_program(RAIL_GO go HINTS "${CMAKE_CURRENT_SOURCE_DIR}/.tools/go/bin" REQUIR
 set(_password_helper "${CMAKE_CURRENT_BINARY_DIR}/RailPasswordHelper")
 file(GLOB _password_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/helpers/onepassword/*.go")
 add_custom_command(OUTPUT "${_password_helper}"
-  COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=1 "${RAIL_GO}" build -trimpath -o "${_password_helper}" .
+  COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=1
+    "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+    "CGO_CFLAGS=-O2 -g -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+    "CGO_LDFLAGS=-O2 -g -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+    "${RAIL_GO}" build -trimpath -o "${_password_helper}" .
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/helpers/onepassword"
   DEPENDS ${_password_sources} helpers/onepassword/go.mod helpers/onepassword/go.sum
   VERBATIM
@@ -296,4 +300,6 @@ if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME BundlePrivacyTests COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/BundlePrivacyTests.py" "${CEF_APP}")
+  add_test(NAME BundleCompatibilityTests COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/BundleCompatibilityTests.py" "${CEF_APP}")
 endif()

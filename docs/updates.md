@@ -29,6 +29,8 @@ The tag points to the tested source, including its engine lock. Automated releas
 
 App and helper minimum macOS versions follow the CEF distribution's deployment target. Sparkle carries that requirement into the appcast, so a future engine that requires a newer macOS is offered only on supported systems. Compatibility failures stop publication until Rail is adapted and the tests pass.
 
+The Go helper receives the same deployment target through its C compiler and linker flags. A bundle compatibility test verifies the actual Mach-O targets of the app, 1Password helper, CEF helpers, and frameworks against the minimum macOS version in the update feed.
+
 Releases use `GITHUB_RUN_NUMBER.GITHUB_RUN_ATTEMPT.0` as the increasing `CFBundleVersion`, independently of Rail's marketing version in `CMakeLists.txt`. Old workflow re-runs cannot publish a lower build number. Publication is serialized. Build, test, notarization, or signing failures leave the existing published release and feed in place; uploaded diagnostics contain app test logs. Re-running a failed pre-publication run gets a new attempt number.
 
 ## First release setup
