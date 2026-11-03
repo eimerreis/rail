@@ -2,6 +2,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_download_handler.h"
+#include "include/cef_context_menu_handler.h"
 
 @interface BrowserController : NSObject <NSWindowDelegate, NSTextFieldDelegate>
 @property(nonatomic, readonly) NSWindow *window;
@@ -34,4 +35,6 @@
 // A free path in the Downloads folder for a new download, or nil to let Chromium cancel it.
 - (NSString *)downloadPathForName:(NSString *)name download:(uint32_t)downloadID;
 - (void)downloadUpdated:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
+// Disposable-profile automation only; normal browsing keeps Chromium's native menu.
+- (BOOL)automateContextMenu:(CefRefPtr<CefMenuModel>)menu callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 @end

@@ -73,6 +73,15 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.select()
 
+    def test_release_uses_committed_engine_without_downgrading(self):
+        releases.verify_engine(self.current, self.current)
+        newer = dict(self.current, chromium_version="156.0.8078.100")
+        releases.verify_engine(newer, self.current)
+        with self.assertRaises(ValueError):
+            releases.verify_engine(self.current, newer)
+        with self.assertRaises(ValueError):
+            releases.verify_engine(dict(self.current, platform="windows64"), self.current)
+
 
 @unittest.skipUnless(sys.platform == "darwin" and (ROOT / "vendor/sparkle/bin/generate_appcast").exists(),
                      "Requires the pinned macOS Sparkle tools")

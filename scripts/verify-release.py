@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Reject stale release runs and ensure Sparkle generated a signed archive entry."""
 from pathlib import Path
-import sys
+import argparse
+import importlib.util
+import json
 import xml.etree.ElementTree as ET
 
 
@@ -25,5 +27,26 @@ def verify(path, version):
         raise ValueError("The signed archive is missing or its length differs from the feed")
 
 
+def verify_engine(current, previous):
+    spec = importlib.util.spec_from_file_location("update_cef", Path(__file__).with_name("update-cef.py"))
+    updates = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(updates)
+    if any(current[key] != previous[key] for key in ("platform", "channel", "index_url")):
+        raise ValueError("The released engine uses a different platform, channel, or index")
+    if updates.version_key(current) < updates.version_key(previous):
+        raise ValueError("Version the latest released Chromium engine before publishing; engine downgrades are not allowed")
+
+
 if __name__ == "__main__":
-    verify(Path(sys.argv[1]), sys.argv[2])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("feed", type=Path, nargs="?")
+    parser.add_argument("version", nargs="?")
+    parser.add_argument("--engine", type=Path)
+    parser.add_argument("--minimum-engine", type=Path)
+    args = parser.parse_args()
+    if args.engine and args.minimum_engine:
+        verify_engine(json.loads(args.engine.read_text()), json.loads(args.minimum_engine.read_text()))
+    elif args.feed and args.version:
+        verify(args.feed, args.version)
+    else:
+        parser.error("Provide feed and version, or --engine and --minimum-engine")

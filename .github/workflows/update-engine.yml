@@ -1,0 +1,82 @@
+name: Propose Chromium update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+concurrency:
+  group: rail-engine-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || vars.RAIL_AUTOMATIC_RELEASES == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Select the newest stable Chromium engine
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/previous-release
+          latest=$(gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
+          args=()
+          if [[ -n "$latest" ]]; then
+            latest=$(gh release view --json tagName --jq .tagName)
+            gh release download "$latest" --pattern cef.lock.json --dir .cache/previous-release
+            args+=(--minimum-lock .cache/previous-release/cef.lock.json)
+          fi
+          uv run --python 3.12 --no-project scripts/update-cef.py --write "${args[@]}"
+          if ! git diff --quiet -- cef.lock.json; then
+            node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const { chromium_version, cef_version } = JSON.parse(readFileSync('cef.lock.json', 'utf8'));
+          writeFileSync(`.changeset/chromium-${cef_version.replaceAll(/[^a-zA-Z0-9-]/g, '-')}.md`, `---\n"rail": patch\n---\n\nUpdate the bundled Chromium engine to ${chromium_version} (CEF ${cef_version}).\n`);
+          JS
+            git add cef.lock.json .changeset/chromium-*.md
+            npm run changeset:check -- --staged
+          fi
+      - name: Propose the engine update with its changeset
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: automation/chromium-update
+          commit-message: Update bundled Chromium with a release changeset
+          title: Update bundled Chromium
+          body: |
+            ## Summary
+
+            ```text
+            stable CEF build → cef.lock.json + patch changeset → merge to main → automatic version + Sparkle release
+            ```
+
+            Merging into main automatically runs changeset status/version, builds and tests Rail, and publishes the signed Sparkle update.
+
+            ## Evidence
+
+            - **Before:** main pins an older engine.
+              **After:** the engine selection and staged changeset checks passed for the proposed update. The native build and browser suites run before publication.
+
+            ## Merge Danger
+
+            **Door:** two-way
+
+            **Blast Radius:** browser
+
+            Merging updates the engine pin and starts the signed release pipeline.
+          add-paths: |
+            cef.lock.json
+            .changeset/chromium-*.md
