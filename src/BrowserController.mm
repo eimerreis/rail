@@ -2462,6 +2462,21 @@ static NSString *ShortAge(double time) {
 
 // Test-only local control channel. It is disabled unless --automation was explicitly supplied.
 // No remote page or production browser session can access this interface.
+- (BOOL)automateContextMenu:(CefRefPtr<CefMenuModel>)menu callback:(CefRefPtr<CefRunContextMenuCallback>)callback {
+  if (!_automation) return NO;
+  NSString *choicePath=[_directory stringByAppendingPathComponent:@"context-menu-choice.txt"];
+  NSString *choice=[NSString stringWithContentsOfFile:choicePath encoding:NSUTF8StringEncoding error:nil];
+  [NSFileManager.defaultManager removeItemAtPath:choicePath error:nil];
+  NSMutableArray *items=[NSMutableArray array]; int selected=-1;
+  for (size_t i=0;i<menu->GetCount();i++) {
+    NSString *title=S(menu->GetLabelAt(i)); BOOL enabled=menu->IsEnabledAt(i);
+    [items addObject:@{@"title":title,@"enabled":@(enabled)}];
+    if (enabled && [title isEqual:choice]) selected=menu->GetCommandIdAt(i);
+  }
+  [[NSJSONSerialization dataWithJSONObject:items options:0 error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"context-menu.json"] atomically:YES];
+  if (selected>=0) callback->Continue(selected,EVENTFLAG_NONE); else callback->Cancel();
+  return YES;
+}
 - (void)processAutomation {
   if (!_automation || _quitting) return;
   NSString *commandPath=[_directory stringByAppendingPathComponent:@"automation-command.json"];

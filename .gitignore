@@ -5,3 +5,4 @@
 /.cache/
 /.runtime-test/
 .DS_Store
+/node_modules/

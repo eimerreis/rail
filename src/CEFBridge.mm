@@ -34,6 +34,38 @@ class DevToolsClient final : public CefClient, public CefLifeSpanHandler, public
   IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 constexpr int InspectElementCommand = MENU_ID_USER_FIRST;
+constexpr int OpenLinkCommand = MENU_ID_USER_FIRST + 1;
+constexpr int OpenImageCommand = MENU_ID_USER_FIRST + 2;
+constexpr int CopyImageCommand = MENU_ID_USER_FIRST + 3;
+
+class CopyImageCallback final : public CefDownloadImageCallback {
+ public:
+  explicit CopyImageCallback(BrowserController *controller)
+      : controller_(controller), pasteboardChange_(NSPasteboard.generalPasteboard.changeCount) {}
+  void OnDownloadImageFinished(const CefString &, int, CefRefPtr<CefImage> image) override {
+    CEF_REQUIRE_UI_THREAD();
+    // A slow image request must not replace something the user copied more recently.
+    NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
+    if (pasteboard.changeCount != pasteboardChange_) return;
+    int width = 0, height = 0;
+    CefRefPtr<CefBinaryValue> png = image ? image->GetAsPNG(1.0f, true, width, height) : nullptr;
+    if (!png) { [controller_ setStatus:@"Couldn't copy the image. Try again."]; return; }
+    NSMutableData *data = [NSMutableData dataWithLength:png->GetSize()];
+    png->GetData(data.mutableBytes, data.length, 0);
+    NSImage *nativeImage = [[NSImage alloc] initWithData:data];
+    if (!nativeImage) { [controller_ setStatus:@"Couldn't copy the image. Try again."]; return; }
+    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+    [item setData:data forType:NSPasteboardTypePNG];
+    NSData *tiff = nativeImage.TIFFRepresentation;
+    if (tiff) [item setData:tiff forType:NSPasteboardTypeTIFF];
+    [pasteboard clearContents];
+    if (![pasteboard writeObjects:@[item]]) [controller_ setStatus:@"Couldn't copy the image. Try again."];
+  }
+ private:
+  __weak BrowserController *controller_;
+  NSInteger pasteboardChange_;
+  IMPLEMENT_REFCOUNTING(CopyImageCallback);
+};
 
 class RailApp final : public CefApp, public CefBrowserProcessHandler {
  public:
@@ -76,14 +108,39 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   }
 
   void OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
-      CefRefPtr<CefContextMenuParams>, CefRefPtr<CefMenuModel> menu) override {
+      CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> menu) override {
     CEF_REQUIRE_UI_THREAD();
+    size_t index = 0;
+    if (!params->GetLinkUrl().empty() && RailNavigationAllowed(params->GetLinkUrl()))
+      menu->InsertItemAt(index++, OpenLinkCommand, "Open Link in New Tab");
+    if (params->GetMediaType() == CM_MEDIATYPE_IMAGE) {
+      if (!params->GetSourceUrl().empty() && RailNavigationAllowed(params->GetSourceUrl()))
+        menu->InsertItemAt(index++, OpenImageCommand, "Open Image in New Tab");
+      menu->InsertItemAt(index++, CopyImageCommand, "Copy Image");
+      menu->SetEnabled(CopyImageCommand, params->HasImageContents() && !params->GetSourceUrl().empty());
+    }
+    if (index && menu->GetCount() > index) menu->InsertSeparatorAt(index);
     if (menu->GetCount()) menu->AddSeparator();
     menu->AddItem(InspectElementCommand, "Inspect Element");
+  }
+  bool RunContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams>,
+      CefRefPtr<CefMenuModel> menu, CefRefPtr<CefRunContextMenuCallback> callback) override {
+    return [controller_ automateContextMenu:menu callback:callback];
   }
   bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
       CefRefPtr<CefContextMenuParams> params, int commandID, EventFlags) override {
     CEF_REQUIRE_UI_THREAD();
+    if (commandID == OpenLinkCommand || commandID == OpenImageCommand) {
+      const CefString url = commandID == OpenLinkCommand ? params->GetLinkUrl() : params->GetSourceUrl();
+      if (!url.empty() && RailNavigationAllowed(url))
+        [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:YES];
+      return true;
+    }
+    if (commandID == CopyImageCommand) {
+      if (params->GetMediaType() == CM_MEDIATYPE_IMAGE && params->HasImageContents() && !params->GetSourceUrl().empty())
+        browser->GetHost()->DownloadImage(params->GetSourceUrl(), false, 0, false, new CopyImageCallback(controller_));
+      return true;
+    }
     if (commandID != InspectElementCommand) return false;
     [controller_ inspectTab:tabID_ generation:generation_ at:CefPoint(params->GetXCoord(), params->GetYCoord())];
     return true;

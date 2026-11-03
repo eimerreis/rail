@@ -13,7 +13,7 @@ cd ~/Github/rail
 
 Rebuild and launch with `./scripts/run.sh`, or build separately with `./scripts/build.sh`. You can also open the `.app` directly or copy it to Applications. Quit a running copy before rebuilding it.
 
-Packaged releases use **Sparkle 2** for automatic updates. Rail checks every six hours, downloads signed updates in the background, and installs them when the browser quits. **Rail → Check for Updates…** checks immediately; the same menu lets you disable automatic checks or installation. The Chromium engine updates with the complete app. A scheduled GitHub Actions workflow checks for new stable CEF builds, rebuilds and tests Rail, then signs, notarizes, and publishes an update. See [release setup](docs/updates.md) for the signing configuration and first release. Development builds without a Sparkle public key retain the source reinstall command below.
+Packaged releases use **Sparkle 2** for automatic updates. Rail checks every six hours, downloads signed updates in the background, and installs them when the browser quits. **Rail → Check for Updates…** checks immediately; the same menu lets you disable automatic checks or installation. The Chromium engine updates with the complete app. Merging changes and their changesets into `main` automatically versions, builds, and tests Rail, then signs, notarizes, and publishes an update. Scheduled Chromium checks propose engine updates with a changeset for the next release. See [release setup](docs/updates.md) for the signing configuration and first release. Development builds without a Sparkle public key retain the source reinstall command below.
 
 To reinstall the latest source version in one step, choose **Rail → Reinstall Latest main**. Rail fetches `main` from `eimerreis/rail`, builds and tests it in a separate cache, then quits, replaces the running app in its current location, and reopens it. Tabs, profiles, launch arguments, the local signing identity, and the GitHub Client ID are preserved. Unsaved pages can prevent the restart; save them and retry. Your development checkout is untouched. The app folder must be writable, and the build requirements below still apply. The first run downloads the build tools and CEF; later runs reuse them. Logs and the updater checkout live in `~/Library/Caches/de.eimerreis.rail/updater/`. Build failures leave the current app running and offer **Show Log**; installation failures restore the previous app and open the log.
 
@@ -81,6 +81,8 @@ Pinned tabs remember the page they were pinned on and keep a name you give them 
 
 Links opened from other apps reuse a pinned tab for that page or a path below it, switching to its Space and keeping its session. For example, a pin for `https://github.com/acme/repo` also opens links to that repository's issues. The most specific pinned path wins; equivalent pins prefer the current Space, then the most recently used tab. Space rules take precedence. If no pin matches, the link opens in a new tab or the selected blank tab.
 
+Right-click a link for **Open Link in New Tab**, or an image for **Copy Image** and **Open Image in New Tab**. New tabs open in the background and follow the same Space and session rules as other new-tab links. Copy Image puts the image itself on the macOS clipboard; unavailable images cannot be copied.
+
 The reading list (**⌘ ⇧ L**, or the tray in the rail) belongs to no Space. Press **⌘ V** there to save the link on your clipboard, or save the current page with **⌘ ⇧ D**. Saved pages load in the background, using the session of the Space that a rule assigns them to, or otherwise the current Space, and appear as plain articles you can read offline. Long reads resume where you stopped. Opening an item never marks it read: press **E** or use **Mark read**, and press it again to undo. **J** and **K** move through the list. Pages behind a login, or with too little text, open as a tab instead. **Open original** and links in an article follow your pinned tabs and Space rules.
 
 Feeds live in the same list. Use **Manage › Add Feed…** with a feed or site address. Feeds are checked every 30 minutes while the app is open, and a new feed brings only its five newest posts. The list is stored in `reading.json`, with saved articles in `Reading/`.
@@ -120,12 +122,18 @@ The first time a card or import needs GitHub, Rail copies a code to the clipboar
 
 Startup loads only the selected page. Other tabs remain unloaded until selected. An unreadable layout gets a recovery copy before a fresh layout is saved. Closing a tab removes its entry, not its profile files. Rail does not import or modify your Arc/Chrome profiles.
 
+## Releases
+
+Run `npm ci` to install the Changesets CLI and pre-commit hook. Every change commit needs a new changeset from `npm run changeset`. Merging or pushing the changes and changesets into `main` runs status/version in CI, commits the generated version metadata, and publishes a signed Sparkle update automatically. See [the release workflow](docs/updates.md) for the full sequence and engine-update proposals.
+
 ## Verify
 
 ```sh
 ./scripts/build.sh             # Release build, bundle signatures, model + persistence tests
+npm test                       # Changesets, commit hooks, versioning, native version propagation and release gating
 node scripts/smoke-test.mjs     # Node 22+: actual native app + Chromium integration checks
 node scripts/devtools-smoke.mjs # DevTools docking, close button, shortcut/menu toggles and lifecycle
+node scripts/context-menu-smoke.mjs # Right-click links/images, background tabs, image clipboard formats
 node scripts/find-smoke.mjs     # Live find bar, counts, navigation, wraparound, keyboard, focus and tab isolation
 node scripts/projects-smoke.mjs # Projects and Activity, health checks, sign-in states, opening environments
 node scripts/external-app-smoke.mjs # Desktop callbacks, confirmation, redirects and actual macOS handoff
@@ -133,6 +141,8 @@ node scripts/theme-smoke.mjs    # All three themes: live switching, no stale sur
 ```
 
 `theme-smoke.mjs` samples pixels with python3 and Pillow. Its full-window screenshots, web content included, need Screen Recording permission for the terminal; without it, it still saves captures of Rail's own views.
+
+`context-menu-smoke.mjs` preserves and restores the clipboard while checking image copying. Set `RAIL_TEST_MOCK_KEYCHAIN=1` to run this check with Chromium's mock Keychain when local Keychain access is unavailable; that mode does not verify real Keychain encryption.
 
 The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. Automation requires an explicit data directory and refuses the normal browser profile. Tests use a separate **Rail Test Safe Storage** Keychain entry, shared across test runs, with real Chromium cookie encryption. The normal browser keeps using **Rail Safe Storage**. Keep the same signing certificate to retain Keychain approvals; a locked login Keychain can still require unlocking. The control channel and remote debugging are enabled only by explicit test arguments.
 

@@ -1,0 +1,22 @@
+{
+  "name": "rail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Release tooling for the native Rail browser",
+  "engines": {
+    "node": "^22.11 || ^24 || >=26",
+    "npm": ">=10.9.0"
+  },
+  "scripts": {
+    "changeset": "changeset",
+    "changeset:status": "changeset status",
+    "changeset:check": "node scripts/check-changesets.mjs",
+    "changeset:version": "node scripts/version-release.mjs",
+    "test": "node --test tests/ChangesetsTests.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
+  },
+  "devDependencies": {
+    "@changesets/cli": "3.0.3",
+    "@changesets/parse": "1.0.0"
+  }
+}

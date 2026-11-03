@@ -2,57 +2,117 @@ name: Release Rail
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 */6 * * *'
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-# A single publisher owns the latest feed. Never cancel a notarization or upload.
+# Serialize versioning through publication. PR checks use independent groups.
 concurrency:
-  group: rail-release
+  group: ${{ github.event_name == 'pull_request' && format('rail-pr-{0}', github.event.pull_request.number) || 'rail-release' }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  changesets:
+    name: Changesets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Require a changeset for every change commit
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$BASE" =~ ^0+$ ]]; then BASE=$(git rev-list --max-parents=0 "$HEAD"); fi
+          npm run changeset:check -- --base "$BASE" --head "$HEAD"
+
+  plan:
+    needs: changesets
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Read the latest main after acquiring the release lock; queued pushes batch.
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Check changeset status and version pending changes
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          gh release list --limit 1000 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
+          node scripts/prepare-release.mjs --releases "$RUNNER_TEMP/releases.json"
+      - name: Persist the generated version on main
+        if: steps.plan.outputs.versioned == 'true'
+        # GITHUB_TOKEN pushes do not start another workflow; this run publishes it.
+        run: git push origin HEAD:refs/heads/main
+
   release:
-    if: github.event_name == 'workflow_dispatch' || vars.RAIL_AUTOMATIC_RELEASES == 'true'
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    permissions:
+      contents: write
     runs-on: macos-26
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       RAIL_RELEASE_REPOSITORY: ${{ github.repository }}
+      RAIL_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      RAIL_APP_VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ needs.plan.outputs.sha }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Select the latest stable Chromium engine
-        id: engine
-        env:
-          EVENT_NAME: ${{ github.event_name }}
+      - run: npm ci
+      - name: Preserve the published update history
         run: |
           set -euo pipefail
           mkdir -p .cache/previous-release .cache/release
           latest=$(gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
-          args=()
           if [[ -n "$latest" ]]; then
             latest=$(gh release view --json tagName --jq .tagName)
-            gh release download "$latest" --pattern cef.lock.json --pattern appcast.xml --dir .cache/previous-release
+            gh release download "$latest" --pattern appcast.xml --pattern cef.lock.json --dir .cache/previous-release
             cp .cache/previous-release/appcast.xml .cache/release/appcast.xml
-            args+=(--minimum-lock .cache/previous-release/cef.lock.json)
+            python3 scripts/verify-release.py --engine cef.lock.json --minimum-engine .cache/previous-release/cef.lock.json
           fi
-          uv run --python 3.12 --no-project scripts/update-cef.py --write "${args[@]}"
-          if [[ "$EVENT_NAME" == schedule && -n "$latest" ]] && cmp -s cef.lock.json .cache/previous-release/cef.lock.json; then
-            echo 'publish=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
-          fi
+          node scripts/release-notes.mjs > .cache/release-notes.md
       - name: Build release
-        if: steps.engine.outputs.publish == 'true'
         env:
           PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
           CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
@@ -88,42 +148,43 @@ jobs:
             "-DRAIL_UPDATE_FEED_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" \
             "-DRAIL_GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
       - name: Exercise the real Chromium engine
-        if: steps.engine.outputs.publish == 'true'
         run: |
           uv pip install --python .tools/bin/python 'pillow==13.0.0'
           export PATH="$PWD/.tools/bin:$PATH"
           node scripts/smoke-test.mjs
           node scripts/projects-smoke.mjs
           node scripts/devtools-smoke.mjs
+          node scripts/context-menu-smoke.mjs
           node scripts/theme-smoke.mjs
           node scripts/find-smoke.mjs
           node scripts/passwords-smoke.mjs
           node scripts/reading-smoke.mjs
       - name: Notarize and sign the update feed
-        if: steps.engine.outputs.publish == 'true'
         env:
           NOTARYTOOL_PROFILE: rail-release
           RELEASE_KEYCHAIN: ${{ runner.temp }}/rail-release.keychain-db
           SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/sparkle-private-key
-          RAIL_RELEASE_TAG: rail-build-${{ github.run_number }}.${{ github.run_attempt }}.0
         run: ./scripts/package-release.sh .cache/release
       - name: Publish the tested source and complete update
-        if: steps.engine.outputs.publish == 'true'
-        env:
-          RAIL_RELEASE_TAG: rail-build-${{ github.run_number }}.${{ github.run_attempt }}.0
         run: |
           set -euo pipefail
           # Older workflow re-runs must not replace a newer latest release.
           python3 scripts/verify-release.py .cache/release/appcast.xml "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT.0"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add cef.lock.json
-          if ! git diff --cached --quiet; then git commit -m 'Update bundled Chromium for release'; fi
-          git tag "$RAIL_RELEASE_TAG"
-          git push origin "refs/tags/$RAIL_RELEASE_TAG"
-          gh release create "$RAIL_RELEASE_TAG" .cache/release/*.zip .cache/release/appcast.xml .cache/release/cef.lock.json \
-            --title "Rail build $GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT.0" --generate-notes --draft
-          gh release edit "$RAIL_RELEASE_TAG" --draft=false --latest
+          if git rev-parse --verify "refs/tags/$RAIL_RELEASE_TAG" >/dev/null 2>&1; then
+            [[ "$(git rev-list -n 1 "$RAIL_RELEASE_TAG")" == "$(git rev-parse HEAD)" ]] || { echo 'Release tag points to a different commit.' >&2; exit 1; }
+          else
+            git tag "$RAIL_RELEASE_TAG"
+            git push origin "refs/tags/$RAIL_RELEASE_TAG"
+          fi
+          # Retry a partially uploaded draft; published releases remain immutable.
+          gh release list --limit 1000 --json tagName,isDraft > .cache/releases.json
+          state=$(node -e 'const r=require("./.cache/releases.json").find(r=>r.tagName===process.env.RAIL_RELEASE_TAG); console.log(r ? (r.isDraft ? "draft" : "published") : "missing")')
+          [[ "$state" != published ]] || { echo 'This version is already published.' >&2; exit 1; }
+          if [[ "$state" == missing ]]; then
+            gh release create "$RAIL_RELEASE_TAG" --verify-tag --title "Rail $RAIL_APP_VERSION" --notes-file .cache/release-notes.md --draft
+          fi
+          gh release upload "$RAIL_RELEASE_TAG" .cache/release/*.zip .cache/release/appcast.xml .cache/release/cef.lock.json --clobber
+          gh release edit "$RAIL_RELEASE_TAG" --title "Rail $RAIL_APP_VERSION" --notes-file .cache/release-notes.md --draft=false --latest
       - name: Preserve failure logs
         if: failure()
         uses: actions/upload-artifact@v4
