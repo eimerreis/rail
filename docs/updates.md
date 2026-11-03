@@ -21,7 +21,7 @@ Chromium updates travel in a complete Rail update. The CEF headers, C++ wrapper,
 `.github/workflows/release.yml` runs every six hours when `RAIL_AUTOMATIC_RELEASES=true`. It compares the selected engine with the latest published release and does no build when nothing changed. It also supports **Run workflow** for an app release without an engine change. The workflow:
 
 1. Checks out `main` and selects the newest stable engine, using the last released lock as a minimum so an app release cannot roll Chromium back.
-2. Builds on an Apple Silicon macOS runner and runs CTest and the browser, projects, reading, and DevTools integration suites with disposable profiles.
+2. Builds on an Apple Silicon macOS runner and runs CTest and the browser, projects, DevTools, theme, find, 1Password, and reading integration suites with disposable profiles.
 3. Notarizes the Developer ID signed app, staples its ticket, and creates the final ZIP. Sparkle signs that archive and the appcast.
 4. Checks the build number and archive metadata before publishing an immutable release tag, ZIP, appcast, and `cef.lock.json` on GitHub Releases. Previous appcast entries keep their original download URLs, including compatible releases for older macOS versions.
 
