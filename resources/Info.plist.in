@@ -34,6 +34,7 @@
   <key>RailGitHubClientID</key><string>${RAIL_GITHUB_CLIENT_ID}</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Eimerrail's Chromium engine uses Bluetooth to detect paired devices for browser and website features.</string>
   <key>NSCameraUsageDescription</key><string>Allow websites you approve to use your camera.</string>
   <key>NSMicrophoneUsageDescription</key><string>Allow websites you approve to use your microphone.</string>
   <key>NSLocationUsageDescription</key><string>Allow websites you approve to use your location.</string>
