@@ -90,6 +90,8 @@ jobs:
       - name: Exercise the real Chromium engine
         if: steps.engine.outputs.publish == 'true'
         run: |
+          uv pip install --python .tools/bin/python 'pillow==13.0.0'
+          export PATH="$PWD/.tools/bin:$PATH"
           node scripts/smoke-test.mjs
           node scripts/projects-smoke.mjs
           node scripts/devtools-smoke.mjs
