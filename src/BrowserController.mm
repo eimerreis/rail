@@ -1,5 +1,6 @@
 #import "BrowserController.h"
 #import "AppUpdater.h"
+#import "ReleaseUpdater.h"
 #import "CEFBridge.h"
 #import "NativeViews.h"
 #import "StateStore.h"
@@ -133,6 +134,7 @@ NSString *NormalizedAddress(NSString *input) {
 
 @implementation BrowserController {
   AppUpdater *_updater;
+  ReleaseUpdater *_releaseUpdater;
   rail::BrowserModel _model;
   rail::Projects _projects;
   ProjectStatusService *_status;
@@ -342,6 +344,7 @@ NSString *NormalizedAddress(NSString *input) {
   _findClose = RailAction(@"",@"xmark",@"Close find (Esc)",^{ [weak closeFind:nil]; });
   for (RailButton *button in @[_findPrevious,_findNext,_findClose]) { button.centered = YES; [_findBar addSubview:button]; }
   _sidebarReveal = _model.state.sidebarVisible ? 1 : 0;
+  if (!_automation) { _releaseUpdater=[[ReleaseUpdater alloc] init]; [_releaseUpdater start]; }
   [self installMenu]; [self refresh]; [self layout];
   [_window center]; [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
   [self ensureBrowser:_model.state.activeTabID];
@@ -386,7 +389,7 @@ NSString *NormalizedAddress(NSString *input) {
   }];
 }
 - (void)reinstallLatestMain:(id)sender {
-  (void)sender; if (_quitting || _automation) return;
+  (void)sender; if (_quitting || _automation || _releaseUpdater.configured) return;
   if (!_updater) {
     _updater=[[AppUpdater alloc] initWithWindow:_window];
     __weak BrowserController *weak=self;
@@ -395,6 +398,9 @@ NSString *NormalizedAddress(NSString *input) {
   }
   [_updater start];
 }
+- (void)checkForUpdates:(id)sender { if (!_quitting && !_automation && !_updater.running) [_releaseUpdater checkForUpdates:sender]; }
+- (void)toggleAutomaticUpdateChecks:(id)sender { (void)sender; _releaseUpdater.automaticallyChecksForUpdates=!_releaseUpdater.automaticallyChecksForUpdates; }
+- (void)toggleAutomaticUpdateDownloads:(id)sender { (void)sender; _releaseUpdater.automaticallyDownloadsUpdates=!_releaseUpdater.automaticallyDownloadsUpdates; }
 - (void)installMenu {
   NSMenu *bar = [[NSMenu alloc] init]; NSApp.mainMenu = bar;
   NSArray *groups = @[@[@"Rail",@[@"About Rail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Rail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Projects",@"showHome:",@"H"],@[@"Activity",@"showActivity:",@"A"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"1Password…",@"showPasswords:",@"P"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"],@[@"Dock Developer Tools",@"toggleDevToolsDock:",@"D"]]];
@@ -403,6 +409,12 @@ NSString *NormalizedAddress(NSString *input) {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:group[0]]; top.submenu = menu; [bar addItem:top];
     for (NSUInteger i=1;i<group.count;i++) {
       NSArray *entry = group[i]; SEL action = NSSelectorFromString(entry[1]);
+      if (action==@selector(reinstallLatestMain:) && _releaseUpdater.configured) {
+        for (NSArray *update in @[@[@"Check for Updates…",@"checkForUpdates:"],@[@"Automatically Check for Updates",@"toggleAutomaticUpdateChecks:"],@[@"Automatically Install Updates",@"toggleAutomaticUpdateDownloads:"]]) {
+          NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:update[0] action:NSSelectorFromString(update[1]) keyEquivalent:@""]; item.target=self; [menu addItem:item];
+        }
+        continue;
+      }
       NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:entry[0] action:action keyEquivalent:entry[2]];
       if (action==@selector(showDevTools:)) item.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption;
       if (action==@selector(toggleDevToolsDock:)) item.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption|NSEventModifierFlagShift;
@@ -1674,7 +1686,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (_model.state.activeSpaceID!=spaceID) { _model.selectSpace(spaceID,Now()); [self ensureBrowser:_model.state.activeTabID]; }
   [self showHome:nil]; [_window makeKeyAndOrderFront:nil];
 }
-- (void)about:(id)sender { (void)sender; [NSApp orderFrontStandardAboutPanelWithOptions:@{NSAboutPanelOptionApplicationName:@"Rail",NSAboutPanelOptionApplicationVersion:@"0.1",NSAboutPanelOptionVersion:@"A personal native browser with Chromium Embedded Framework."}]; }
+- (void)about:(id)sender { (void)sender; [NSApp orderFrontStandardAboutPanelWithOptions:@{NSAboutPanelOptionApplicationName:@"Rail"}]; }
 - (BOOL)windowShouldClose:(NSWindow *)sender { (void)sender; [self quit:nil]; return NO; }
 - (void)quit:(id)sender {
   [_passwordService stop]; [_passwordPalette close];
@@ -2272,6 +2284,15 @@ static NSString *ShortAge(double time) {
   [self newProjectWithURL:active->url session:active->sessionID];
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
+  if (item.action==@selector(checkForUpdates:)) return !_quitting && !_automation && !_updater.running && _releaseUpdater.canCheckForUpdates;
+  if (item.action==@selector(toggleAutomaticUpdateChecks:)) {
+    item.state=_releaseUpdater.automaticallyChecksForUpdates ? NSControlStateValueOn : NSControlStateValueOff;
+    return !_quitting && _releaseUpdater.configured;
+  }
+  if (item.action==@selector(toggleAutomaticUpdateDownloads:)) {
+    item.state=_releaseUpdater.automaticallyDownloadsUpdates ? NSControlStateValueOn : NSControlStateValueOff;
+    return !_quitting && _releaseUpdater.configured && _releaseUpdater.automaticallyChecksForUpdates;
+  }
   if (item.action==@selector(reinstallLatestMain:)) {
     item.title=_updater.running ? @"Reinstalling Latest main…" : @"Reinstall Latest main";
     return !_quitting && !_automation && !_updater.running;

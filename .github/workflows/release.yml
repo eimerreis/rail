@@ -1,0 +1,133 @@
+name: Release Rail
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+# A single publisher owns the latest feed. Never cancel a notarization or upload.
+concurrency:
+  group: rail-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || vars.RAIL_AUTOMATIC_RELEASES == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RAIL_RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Select the latest stable Chromium engine
+        id: engine
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/previous-release .cache/release
+          latest=$(gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName // empty')
+          args=()
+          if [[ -n "$latest" ]]; then
+            latest=$(gh release view --json tagName --jq .tagName)
+            gh release download "$latest" --pattern cef.lock.json --pattern appcast.xml --dir .cache/previous-release
+            cp .cache/previous-release/appcast.xml .cache/release/appcast.xml
+            args+=(--minimum-lock .cache/previous-release/cef.lock.json)
+          fi
+          uv run --python 3.12 --no-project scripts/update-cef.py --write "${args[@]}"
+          if [[ "$EVENT_NAME" == schedule && -n "$latest" ]] && cmp -s cef.lock.json .cache/previous-release/cef.lock.json; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build release
+        if: steps.engine.outputs.publish == 'true'
+        env:
+          PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+          CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.RELEASE_KEYCHAIN_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GITHUB_CLIENT_ID: ${{ vars.RAIL_GITHUB_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          for required in PUBLIC_KEY CERTIFICATE CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER SPARKLE_KEY; do
+            [[ -n "${!required}" ]] || { echo "Missing release configuration: $required" >&2; exit 1; }
+          done
+          umask 077
+          keychain="$RUNNER_TEMP/rail-release.keychain-db"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/rail-signing.p12"
+          printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          printf '%s' "$SPARKLE_KEY" > "$RUNNER_TEMP/sparkle-private-key"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$RUNNER_TEMP/rail-signing.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -nE '/Developer ID Application:/s/.* ([0-9A-F]{40}) .*/\1/p')
+          [[ "$identity" =~ ^[0-9A-F]{40}$ ]] || { echo 'Expected one Developer ID Application identity.' >&2; exit 1; }
+          xcrun notarytool store-credentials rail-release --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --keychain "$keychain"
+          ./scripts/build.sh "-DRAIL_SIGN_IDENTITY=$identity" \
+            -DRAIL_DISTRIBUTION=ON "-DRAIL_BUILD_VERSION=$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT.0" \
+            "-DRAIL_UPDATE_PUBLIC_KEY=$PUBLIC_KEY" \
+            "-DRAIL_UPDATE_FEED_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" \
+            "-DRAIL_GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
+      - name: Exercise the real Chromium engine
+        if: steps.engine.outputs.publish == 'true'
+        run: |
+          node scripts/smoke-test.mjs
+          node scripts/projects-smoke.mjs
+          node scripts/reading-smoke.mjs
+          node scripts/devtools-smoke.mjs
+      - name: Notarize and sign the update feed
+        if: steps.engine.outputs.publish == 'true'
+        env:
+          NOTARYTOOL_PROFILE: rail-release
+          RELEASE_KEYCHAIN: ${{ runner.temp }}/rail-release.keychain-db
+          SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/sparkle-private-key
+          RAIL_RELEASE_TAG: rail-build-${{ github.run_number }}.${{ github.run_attempt }}.0
+        run: ./scripts/package-release.sh .cache/release
+      - name: Publish the tested source and complete update
+        if: steps.engine.outputs.publish == 'true'
+        env:
+          RAIL_RELEASE_TAG: rail-build-${{ github.run_number }}.${{ github.run_attempt }}.0
+        run: |
+          set -euo pipefail
+          # Older workflow re-runs must not replace a newer latest release.
+          python3 scripts/verify-release.py .cache/release/appcast.xml "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT.0"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add cef.lock.json
+          if ! git diff --cached --quiet; then git commit -m 'Update bundled Chromium for release'; fi
+          git tag "$RAIL_RELEASE_TAG"
+          git push origin "refs/tags/$RAIL_RELEASE_TAG"
+          gh release create "$RAIL_RELEASE_TAG" .cache/release/*.zip .cache/release/appcast.xml .cache/release/cef.lock.json \
+            --title "Rail build $GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT.0" --generate-notes --draft
+          gh release edit "$RAIL_RELEASE_TAG" --draft=false --latest
+      - name: Preserve failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-diagnostics
+          path: .runtime-test/**/app.log
+          if-no-files-found: ignore
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/rail-release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/rail-signing.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/sparkle-private-key"

@@ -9,9 +9,9 @@
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>@HELPER_NAME@</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>@PROJECT_VERSION@</string>
+  <key>CFBundleVersion</key><string>@RAIL_BUILD_VERSION@</string>
   <key>CFBundleShortVersionString</key><string>@PROJECT_VERSION@</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
   <key>LSUIElement</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>LSFileQuarantineEnabled</key><true/>

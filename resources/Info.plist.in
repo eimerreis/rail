@@ -32,9 +32,16 @@
   </array>
   <key>RailSigningIdentity</key><string>${RAIL_SIGN_IDENTITY_XML}</string>
   <key>RailGitHubClientID</key><string>${RAIL_GITHUB_CLIENT_ID}</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>SUFeedURL</key><string>${RAIL_UPDATE_FEED_URL_XML}</string>
+  <key>SUPublicEDKey</key><string>${RAIL_UPDATE_PUBLIC_KEY}</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>21600</integer>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SURequireSignedFeed</key><true/>
+  <key>SUEnableSystemProfiling</key><false/>
+  <key>LSMinimumSystemVersion</key><string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSBluetoothAlwaysUsageDescription</key><string>Eimerrail's Chromium engine uses Bluetooth to detect paired devices for browser and website features.</string>
   <key>NSCameraUsageDescription</key><string>Allow websites you approve to use your camera.</string>
   <key>NSMicrophoneUsageDescription</key><string>Allow websites you approve to use your microphone.</string>
   <key>NSLocationUsageDescription</key><string>Allow websites you approve to use your location.</string>

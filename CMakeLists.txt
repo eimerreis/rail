@@ -8,6 +8,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 option(RAIL_BUILD_APP "Build the native macOS browser and CEF helpers" ON)
 set(RAIL_SIGN_IDENTITY "AUTO" CACHE STRING "Local macOS signing identity; AUTO selects a single installed identity, '-' uses ad-hoc signing")
+set(RAIL_BUILD_VERSION "${PROJECT_VERSION}" CACHE STRING "Monotonically increasing Sparkle build version")
+set(RAIL_UPDATE_FEED_URL "https://github.com/eimerreis/rail/releases/latest/download/appcast.xml" CACHE STRING "HTTPS Sparkle appcast URL")
+set(RAIL_UPDATE_PUBLIC_KEY "" CACHE STRING "Base64 Sparkle Ed25519 public key; empty disables release updates")
+option(RAIL_DISTRIBUTION "Use timestamped Developer ID signatures for distribution" OFF)
 # Client ID of the Rail GitHub App (device flow enabled). Can also be set later with
 # `defaults write de.eimerreis.rail GitHubClientID <id>`.
 set(RAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Rail GitHub App")
@@ -15,6 +19,8 @@ set(RAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Rail GitHub App")
 add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp src/Reading.cpp)
 target_include_directories(BrowserModel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 if(BUILD_TESTING)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME UpdateTests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/UpdateTests.py")
   add_executable(BrowserModelTests tests/BrowserModelTests.cpp)
   target_link_libraries(BrowserModelTests PRIVATE BrowserModel)
   add_test(NAME BrowserModelTests COMMAND BrowserModelTests)
@@ -57,6 +63,30 @@ if(NOT APPLE)
 endif()
 
 include(cmake/Signing.cmake)
+set(RAIL_TIMESTAMP_FLAG --timestamp=none)
+if(RAIL_DISTRIBUTION)
+  if(RAIL_SIGN_IDENTITY STREQUAL "-")
+    message(FATAL_ERROR "Distribution requires a Developer ID signing identity.")
+  endif()
+  if(NOT RAIL_UPDATE_FEED_URL MATCHES "^https://[^/]+/" OR RAIL_UPDATE_PUBLIC_KEY STREQUAL "")
+    message(FATAL_ERROR "Distribution requires an HTTPS Sparkle feed and an Ed25519 public key.")
+  endif()
+  set(RAIL_TIMESTAMP_FLAG --timestamp)
+endif()
+if(NOT RAIL_BUILD_VERSION MATCHES "^[0-9]+(\\.[0-9]+)*$")
+  message(FATAL_ERROR "RAIL_BUILD_VERSION must be a numeric dotted version.")
+endif()
+if(NOT RAIL_UPDATE_PUBLIC_KEY STREQUAL "")
+  string(LENGTH "${RAIL_UPDATE_PUBLIC_KEY}" _update_key_length)
+  # A 32-byte Ed25519 public key is 44 base64 characters with one '='.
+  if(NOT _update_key_length EQUAL 44 OR NOT RAIL_UPDATE_PUBLIC_KEY MATCHES "^[A-Za-z0-9+/]+=$")
+    message(FATAL_ERROR "RAIL_UPDATE_PUBLIC_KEY must be a base64-encoded Ed25519 public key.")
+  endif()
+endif()
+set(RAIL_UPDATE_FEED_URL_XML "${RAIL_UPDATE_FEED_URL}")
+string(REPLACE "&" "&amp;" RAIL_UPDATE_FEED_URL_XML "${RAIL_UPDATE_FEED_URL_XML}")
+string(REPLACE "<" "&lt;" RAIL_UPDATE_FEED_URL_XML "${RAIL_UPDATE_FEED_URL_XML}")
+string(REPLACE ">" "&gt;" RAIL_UPDATE_FEED_URL_XML "${RAIL_UPDATE_FEED_URL_XML}")
 # Preserve the effective local identity when the in-app updater builds main.
 set(RAIL_SIGN_IDENTITY_XML "${RAIL_SIGN_IDENTITY}")
 string(REPLACE "&" "&amp;" RAIL_SIGN_IDENTITY_XML "${RAIL_SIGN_IDENTITY_XML}")
@@ -96,6 +126,7 @@ endforeach()
 add_executable(Rail MACOSX_BUNDLE
   src/main.mm
   src/AppUpdater.mm
+  src/ReleaseUpdater.mm
   src/BrowserController.mm
   src/CEFBridge.mm
   src/NativeViews.mm
@@ -118,18 +149,21 @@ target_include_directories(Rail PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_options(Rail PRIVATE
   "$<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS};${CEF_CXX_COMPILER_FLAGS};-fobjc-arc>"
 )
-target_link_libraries(Rail PRIVATE BrowserModel libcef_dll_wrapper ${CEF_STANDARD_LIBS} "-framework Network" "-framework Security" "-framework CoreText")
+target_link_libraries(Rail PRIVATE BrowserModel libcef_dll_wrapper ${CEF_STANDARD_LIBS} "-framework Network" "-framework Security" "-framework CoreText" Sparkle)
 set_target_properties(Rail PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist.in"
   MACOSX_BUNDLE_BUNDLE_NAME Rail
   MACOSX_BUNDLE_GUI_IDENTIFIER de.eimerreis.rail
-  MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+  MACOSX_BUNDLE_BUNDLE_VERSION "${RAIL_BUILD_VERSION}"
   MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
   XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
   XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
+  BUILD_WITH_INSTALL_RPATH TRUE
+  INSTALL_RPATH "@executable_path/../Frameworks"
 )
 
 set(CEF_APP "${CEF_TARGET_OUT_DIR}/Rail.app")
+include(cmake/Sparkle.cmake)
 # Bundle the worker before signing; it is copied outside the bundle when run.
 set_property(TARGET Rail APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/reinstall-main.sh")
 find_program(RAIL_GO go HINTS "${CMAKE_CURRENT_SOURCE_DIR}/.tools/go/bin" REQUIRED)
@@ -189,7 +223,7 @@ foreach(_suffix_list IN LISTS CEF_HELPER_APP_SUFFIXES)
     "${CMAKE_CURRENT_BINARY_DIR}/helper-Info.plist.in"
   )
   add_custom_command(TARGET ${_helper_target} POST_BUILD
-    COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" --timestamp=none --options runtime
+    COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" ${RAIL_TIMESTAMP_FLAG} --options runtime
       --entitlements "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements-helper.plist"
       "$<TARGET_BUNDLE_DIR:${_helper_target}>"
     VERBATIM
@@ -202,14 +236,13 @@ foreach(_suffix_list IN LISTS CEF_HELPER_APP_SUFFIXES)
   )
 endforeach()
 
-# Sign nested libraries before the framework and app. Signing is local; no
-# notarization, timestamp service, or distribution is used.
+# Sign nested libraries before the framework and app.
 set(_framework "${CEF_APP}/Contents/Frameworks/Chromium Embedded Framework.framework")
 file(GLOB _cef_libraries "${CEF_BINARY_DIR_RELEASE}/Chromium Embedded Framework.framework/Libraries/*.dylib")
 foreach(_library IN LISTS _cef_libraries)
   get_filename_component(_library_name "${_library}" NAME)
   add_custom_command(TARGET Rail POST_BUILD
-    COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" --timestamp=none
+    COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" ${RAIL_TIMESTAMP_FLAG}
       "${_framework}/Versions/A/Libraries/${_library_name}"
     VERBATIM
   )
@@ -224,10 +257,11 @@ set_property(TARGET Rail APPEND PROPERTY LINK_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts/Manrope-Variable.ttf"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements-password-helper.plist"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/OnePassword-Notices.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cef.lock.json"
 )
 add_custom_command(TARGET Rail POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_password_helper}" "${CEF_APP}/Contents/MacOS/RailPasswordHelper"
-  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" --timestamp=none --options runtime
+  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" ${RAIL_TIMESTAMP_FLAG} --options runtime
     --entitlements "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements-password-helper.plist" "${CEF_APP}/Contents/MacOS/RailPasswordHelper"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${CEF_APP}/Contents/Resources"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/resources/OnePassword-Notices.txt" "${CEF_APP}/Contents/Resources/OnePassword-Notices.txt"
@@ -247,8 +281,10 @@ add_custom_command(TARGET Rail POST_BUILD
     "${CEF_ROOT}/LICENSE.txt" "${CEF_APP}/Contents/Resources/CEF-LICENSE.txt"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${CEF_ROOT}/CREDITS.html" "${CEF_APP}/Contents/Resources/CEF-CREDITS.html"
-  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" --timestamp=none "${_framework}"
-  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" --timestamp=none --options runtime
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/cef.lock.json" "${CEF_APP}/Contents/Resources/cef.lock.json"
+  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" ${RAIL_TIMESTAMP_FLAG} "${_framework}"
+  COMMAND /usr/bin/codesign --force --sign "${RAIL_SIGN_IDENTITY}" ${RAIL_TIMESTAMP_FLAG} --options runtime
     --entitlements "${CMAKE_CURRENT_SOURCE_DIR}/resources/entitlements.plist" "${CEF_APP}"
   COMMAND /usr/bin/codesign --verify --deep --strict "${CEF_APP}"
   VERBATIM
