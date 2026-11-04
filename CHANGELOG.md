@@ -1,5 +1,12 @@
 # rail
 
+## 0.4.2
+
+### Patch Changes
+
+- 186d885: Keep unread counts and Retry buttons in the Reading feeds list visible when classic scrollbars are shown.
+- 175214c: Run the real-engine smoke tests on every pull request, so failures show up before merging instead of during a release.
+
 ## 0.4.1
 
 ### Patch Changes
