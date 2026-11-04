@@ -191,6 +191,8 @@ jobs:
         with:
           name: release-diagnostics
           path: .runtime-test/**/app.log
+          # The profiles live in a dot directory, which uploads skip by default.
+          include-hidden-files: true
           if-no-files-found: ignore
       - name: Remove signing material
         if: always()
