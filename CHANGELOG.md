@@ -1,5 +1,11 @@
 # rail
 
+## 0.5.1
+
+### Patch Changes
+
+- a048945: Fix the Checks list sitting off-centre in its popover, which left a bare strip along the top and right and cut off its left and bottom edges.
+
 ## 0.5.0
 
 ### Minor Changes
