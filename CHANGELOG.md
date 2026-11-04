@@ -1,5 +1,11 @@
 # rail
 
+## 0.4.0
+
+### Minor Changes
+
+- 278bbfa: Activity and Projects now refresh on their own, and a toolbar capsule follows your open pull requests and the pipelines you started, announcing when they pass or fail. Failures stay until you acknowledge them.
+
 ## 0.3.0
 
 ### Minor Changes
