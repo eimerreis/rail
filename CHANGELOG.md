@@ -1,5 +1,11 @@
 # rail
 
+## 0.5.0
+
+### Minor Changes
+
+- 2cfb7ce: Open local files from the address bar with a `file://` address or a path such as `~/Source/test.png`, including ones with spaces.
+
 ## 0.4.2
 
 ### Patch Changes
