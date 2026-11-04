@@ -183,6 +183,7 @@ bool BrowserModel::selectTab(const std::string& id, double now) {
     now = timestamp(now);
     if (auto* previous = tab(state.activeTabID)) previous->lastUsed = now;
     selected->lastUsed = now;
+    selected->snoozedUntil = 0;
     owner->selectedTabID = selected->id;
     state.activeSpaceID = selected->spaceID;
     state.activeTabID = selected->id;
@@ -193,9 +194,9 @@ bool BrowserModel::selectSpace(const std::string& id, double now) {
     const auto* owner = space(id);
     if (!owner) return false;
     const auto* selected = tab(owner->selectedTabID);
-    if (selected && selected->spaceID == id) return selectTab(selected->id, now);
+    if (selected && selected->spaceID == id && !selected->snoozed()) return selectTab(selected->id, now);
     const auto found = std::find_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& current) {
-        return current.spaceID == id;
+        return current.spaceID == id && !current.snoozed();
     });
     return found != state.tabs.end() && selectTab(found->id, now);
 }
@@ -203,9 +204,9 @@ std::string BrowserModel::ensureSpaceTab(const std::string& spaceID, double now)
     auto* owner = space(spaceID);
     if (!owner) return {};
     const auto* remembered = tab(owner->selectedTabID);
-    if (remembered && remembered->spaceID == owner->id) return remembered->id;
+    if (remembered && remembered->spaceID == owner->id && !remembered->snoozed()) return remembered->id;
     const auto found = std::find_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& current) {
-        return current.spaceID == owner->id;
+        return current.spaceID == owner->id && !current.snoozed();
     });
     if (found != state.tabs.end()) {
         owner->selectedTabID = found->id;
@@ -238,7 +239,7 @@ bool BrowserModel::closeTab(const std::string& id, double now) {
         if (!wasActive) { remember(); return true; }
         const Tab* next = nullptr;
         for (const auto& candidate : state.tabs) {
-            if (candidate.spaceID != ownerID || candidate.id == closedID) continue;
+            if (candidate.spaceID != ownerID || candidate.id == closedID || candidate.snoozed()) continue;
             if (!next || candidate.lastUsed > next->lastUsed) next = &candidate;
         }
         if (next) selectTab(next->id, now);
@@ -249,7 +250,7 @@ bool BrowserModel::closeTab(const std::string& id, double now) {
     state.tabs.erase(std::remove_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& candidate) {
         return candidate.id == closedID;
     }), state.tabs.end());
-    const bool hadOthers = std::any_of(state.tabs.begin(), state.tabs.end(), [&](const Tab& other) { return other.spaceID == ownerID; });
+    const bool hadOthers = std::any_of(state.tabs.begin(), state.tabs.end(), [&](const Tab& other) { return other.spaceID == ownerID && !other.snoozed(); });
     const auto replacement = ensureSpaceTab(ownerID, now);
     if (!hadOthers) record.replacementID = replacement;
     if (wasActive) selectTab(replacement, now);
@@ -333,6 +334,54 @@ bool BrowserModel::moveTab(const std::string& tabID, const std::string& targetSp
     ensureSpaceTab(targetID, now);
     if (wasActive) selectTab(movedID, now);
     return true;
+}
+bool BrowserModel::snoozeTabs(const std::vector<std::string>& ids, double until, double now) {
+    if (!std::isfinite(until) || until <= timestamp(now)) return false;
+    std::vector<std::string> spaces;
+    for (const auto& id : ids) {
+        auto* current = tab(id);
+        if (!current || current->pinned) continue;
+        current->snoozedUntil = until;
+        spaces.push_back(current->spaceID);
+    }
+    if (spaces.empty()) return false;
+    const auto* active = tab(state.activeTabID);
+    const bool activeSnoozed = active && active->snoozed();
+    const auto activeSpace = state.activeSpaceID;
+    // Every Space keeps a visible tab, even if that means a new blank one.
+    for (const auto& spaceID : spaces) ensureSpaceTab(spaceID, now);
+    if (activeSnoozed) selectTab(ensureSpaceTab(activeSpace, now), now);
+    return true;
+}
+bool BrowserModel::wakeTab(const std::string& id, double now) {
+    auto* current = tab(id);
+    if (!current || !current->snoozed()) return false;
+    current->snoozedUntil = 0;
+    current->lastUsed = timestamp(now);
+    return true;
+}
+std::vector<std::string> BrowserModel::wakeDueTabs(double now) {
+    std::vector<std::string> woken;
+    for (auto& current : state.tabs) {
+        if (current.snoozed() && current.snoozedUntil <= now) woken.push_back(current.id);
+    }
+    for (const auto& id : woken) wakeTab(id, now);
+    return woken;
+}
+std::vector<std::string> BrowserModel::listedTabs(const std::string& spaceID) const {
+    std::vector<std::string> listed;
+    for (const auto& current : state.tabs) {
+        if (current.spaceID == spaceID && !current.pinned && !current.snoozed()) listed.push_back(current.id);
+    }
+    return listed;
+}
+std::vector<std::string> BrowserModel::tabRange(const std::string& spaceID, const std::string& from, const std::string& to) const {
+    const auto listed = listedTabs(spaceID);
+    const auto end = std::find(listed.begin(), listed.end(), to);
+    if (end == listed.end()) return {};
+    const auto start = std::find(listed.begin(), listed.end(), from);
+    if (start == listed.end()) return {to};
+    return start < end ? std::vector<std::string>(start, end + 1) : std::vector<std::string>(end, start + 1);
 }
 std::string BrowserModel::addSpace(const std::string& name, const std::string& sessionID, double now) {
     if (state.sessions.empty()) return {};
@@ -478,7 +527,10 @@ void BrowserModel::sanitize(double now) {
         }
         if (!current.pinned) { current.pinnedURL.clear(); current.pinnedTitle.clear(); current.customTitle.clear(); }
         else if (current.pinnedURL.empty()) { current.pinnedURL = current.url; current.pinnedTitle = current.title; }
+        // A tab whose time passed while Rail was closed is simply back.
+        if (current.pinned || !std::isfinite(current.snoozedUntil) || current.snoozedUntil <= now) current.snoozedUntil = 0;
     }
+    if (auto* active = tab(remapped(tabIDs, state.activeTabID))) active->snoozedUntil = 0;
 
     for (auto& rule : state.spaceRules) rule.spaceID = remapped(spaceIDs, rule.spaceID);
     sanitizeRules();

@@ -583,6 +583,116 @@ void sanitizePreservesValidState() {
     require(model.state.activeSpaceID == "personal", "valid active tab should restore its owning Space");
 }
 
+void snoozingHidesTabsAndMovesOffTheActiveOne() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto first = model.state.activeTabID;
+    const auto second = model.addTab(spaceID, "https://two.example", 10);
+    const auto third = model.addTab(spaceID, "https://three.example", 10);
+    require(model.state.activeTabID == third, "the newest tab should be active");
+    require(model.snoozeTabs({second, third}, 100, 20), "snoozing should succeed");
+    require(model.state.activeTabID == first, "the active tab should move to a tab that is still visible");
+    require(model.listedTabs(spaceID) == std::vector<std::string>{first}, "snoozed tabs should leave the list");
+    require(model.tab(second)->spaceID == spaceID, "a snoozed tab should stay in its Space");
+    require(!model.snoozeTabs({first}, 20, 20), "a time that has already passed should be refused");
+    require(!model.tab(first)->snoozed(), "a refused snooze should change nothing");
+}
+
+void snoozingEveryTabLeavesABlankOne() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto only = model.state.activeTabID;
+    require(model.snoozeTabs({only}, 100, 20), "snoozing the only tab should succeed");
+    require(model.state.activeTabID != only, "the snoozed tab should not stay active");
+    require(model.tab(model.state.activeTabID)->url == "about:blank", "the Space should get a blank tab");
+    require(model.state.activeSpaceID == spaceID, "the Space should stay active");
+    const auto other = model.state.spaces[1].id;
+    require(model.selectSpace(other, 30), "another Space should open");
+    require(model.selectSpace(spaceID, 31), "the Space should reopen");
+    require(!model.tab(model.state.activeTabID)->snoozed(), "reopening a Space should not show a snoozed tab");
+}
+
+void pinnedTabsCannotBeSnoozed() {
+    rail::BrowserModel model;
+    const auto pinned = model.state.activeTabID;
+    require(model.setPinned(pinned, true), "pinning should succeed");
+    require(!model.snoozeTabs({pinned}, 100, 20), "a pinned tab should not snooze");
+    require(!model.tab(pinned)->snoozed(), "a pinned tab should stay awake");
+    require(model.state.activeTabID == pinned, "the pinned tab should stay active");
+}
+
+void snoozedTabsWakeInPlace() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto first = model.state.activeTabID;
+    const auto second = model.addTab(spaceID, "https://two.example", 10);
+    const auto third = model.addTab(spaceID, "https://three.example", 10);
+    require(model.snoozeTabs({second}, 100, 20), "the first snooze should succeed");
+    require(model.snoozeTabs({first}, 200, 20), "the second snooze should succeed");
+    require(model.wakeDueTabs(99).empty(), "nothing should wake early");
+    require(model.wakeDueTabs(100) == std::vector<std::string>{second}, "only the due tab should wake");
+    require(model.state.activeTabID == third, "waking should not take over the page");
+    require(model.listedTabs(spaceID) == std::vector<std::string>({second, third}), "a woken tab should return to its place");
+    require(model.selectTab(first, 150), "a snoozed tab can still be opened");
+    require(!model.tab(first)->snoozed(), "opening a snoozed tab should wake it");
+}
+
+void closingALastVisibleTabIgnoresSnoozedOnes() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto first = model.state.activeTabID;
+    const auto second = model.addTab(spaceID, "https://two.example", 10);
+    require(model.snoozeTabs({first}, 100, 20), "snoozing should succeed");
+    require(model.closeTab(second, 30), "closing should succeed");
+    require(model.state.activeTabID != first, "closing should not open a snoozed tab");
+    require(model.tab(model.state.activeTabID)->url == "about:blank", "closing should leave a blank tab");
+    require(model.tab(first)->snoozed(), "the snoozed tab should stay snoozed");
+    require(model.reopenClosedTab(40) == second, "the closed tab should come back");
+    require(model.listedTabs(spaceID) == std::vector<std::string>{second}, "reopening should remove the blank replacement");
+}
+
+void sanitizeWakesOverdueAndInvalidSnoozes() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto active = model.state.activeTabID;
+    const auto due = model.addTab(spaceID, "https://due.example", 10);
+    const auto waiting = model.addTab(spaceID, "https://waiting.example", 10);
+    const auto invalid = model.addTab(spaceID, "https://invalid.example", 10);
+    const auto pinned = model.addTab(spaceID, "https://pinned.example", 10);
+    model.selectTab(active, 10);
+    model.tab(due)->snoozedUntil = 50;
+    model.tab(waiting)->snoozedUntil = 500;
+    model.tab(invalid)->snoozedUntil = std::numeric_limits<double>::infinity();
+    model.setPinned(pinned, true);
+    model.tab(pinned)->snoozedUntil = 500;
+    model.tab(active)->snoozedUntil = 500;
+    model.sanitize(100);
+    require(!model.tab(due)->snoozed(), "an overdue tab should be back after a restart");
+    require(model.tab(waiting)->snoozed(), "a tab still waiting should stay snoozed");
+    require(!model.tab(invalid)->snoozed(), "an invalid time should be dropped");
+    require(!model.tab(pinned)->snoozed(), "a pinned tab should not be snoozed");
+    require(!model.tab(active)->snoozed(), "the active tab should not be snoozed");
+}
+
+void tabRangesFollowTheSidebarList() {
+    rail::BrowserModel model;
+    const auto spaceID = model.state.activeSpaceID;
+    const auto a = model.state.activeTabID;
+    const auto b = model.addTab(spaceID, "https://b.example", 10);
+    const auto c = model.addTab(spaceID, "https://c.example", 10);
+    const auto d = model.addTab(spaceID, "https://d.example", 10);
+    const auto e = model.addTab(spaceID, "https://e.example", 10);
+    using List = std::vector<std::string>;
+    require(model.tabRange(spaceID, a, c) == List({a, b, c}), "a range should run downward");
+    require(model.tabRange(spaceID, c, a) == List({a, b, c}), "a range should run upward in list order");
+    require(model.tabRange(spaceID, c, c) == List({c}), "a range can be one tab");
+    require(model.setPinned(b, true), "pinning should succeed");
+    require(model.snoozeTabs({d}, 100, 20), "snoozing should succeed");
+    require(model.tabRange(spaceID, a, e) == List({a, c, e}), "a range should skip tabs that aren't listed");
+    require(model.tabRange(spaceID, b, e) == List({e}), "an unlisted start should select just the destination");
+    require(model.tabRange(spaceID, a, d).empty(), "an unlisted destination should select nothing");
+}
+
 using Test = std::pair<std::string, std::function<void()>>;
 
 } // namespace
@@ -617,6 +727,13 @@ int main(int argc, char** argv) {
         {"rule-glob", globRulesMatchHostAndPath},
         {"rule-space", spaceRulesChooseMostSpecificSpace},
         {"rule-sanitize", sanitizeRepairsSpaceRules},
+        {"snooze", snoozingHidesTabsAndMovesOffTheActiveOne},
+        {"snooze-all", snoozingEveryTabLeavesABlankOne},
+        {"snooze-pinned", pinnedTabsCannotBeSnoozed},
+        {"snooze-wake", snoozedTabsWakeInPlace},
+        {"snooze-close", closingALastVisibleTabIgnoresSnoozedOnes},
+        {"snooze-sanitize", sanitizeWakesOverdueAndInvalidSnoozes},
+        {"tab-range", tabRangesFollowTheSidebarList},
     };
     unsigned passed = 0;
     unsigned failed = 0;

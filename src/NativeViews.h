@@ -35,6 +35,8 @@ NSString *RailSymbolTitle(NSString *symbol);
 @property(nonatomic, copy) void (^handler)(void);
 // Runs on a double-click, after the first click has performed the action.
 @property(nonatomic, copy) void (^onDoubleClick)(void);
+// Runs instead of the action on a ⌘ or ⇧ click, with whichever of the two were held.
+@property(nonatomic, copy) void (^onModifiedClick)(NSEventModifierFlags flags);
 @property(nonatomic, strong) NSColor *normalFill;
 @property(nonatomic, strong) NSColor *hoverFill;
 @property(nonatomic, strong) NSColor *ink;

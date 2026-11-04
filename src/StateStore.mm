@@ -21,7 +21,7 @@ bool LoadState(NSString *directory, BrowserModel &model, NSError **error) {
   State state;
   for (id item in Array(value[@"sessions"])) if ([item isKindOfClass:NSDictionary.class]) state.sessions.push_back({Text(item[@"id"]),Text(item[@"name"])});
   for (id item in Array(value[@"spaces"])) if ([item isKindOfClass:NSDictionary.class]) state.spaces.push_back({Text(item[@"id"]),Text(item[@"name"]),Text(item[@"sessionID"]),Text(item[@"selectedTabID"]),Text(item[@"icon"])});
-  for (id item in Array(value[@"tabs"])) if ([item isKindOfClass:NSDictionary.class]) state.tabs.push_back({Text(item[@"id"]),Text(item[@"spaceID"]),Text(item[@"sessionID"]),Text(item[@"title"]),Text(item[@"url"]),ReadBoolean(item[@"pinned"],false),0,Text(item[@"pinnedURL"]),Text(item[@"pinnedTitle"]),Text(item[@"customTitle"])});
+  for (id item in Array(value[@"tabs"])) if ([item isKindOfClass:NSDictionary.class]) state.tabs.push_back({Text(item[@"id"]),Text(item[@"spaceID"]),Text(item[@"sessionID"]),Text(item[@"title"]),Text(item[@"url"]),ReadBoolean(item[@"pinned"],false),0,Text(item[@"pinnedURL"]),Text(item[@"pinnedTitle"]),Text(item[@"customTitle"]),Number(item[@"snoozedUntil"],0)});
   for (id item in Array(value[@"spaceRules"])) if ([item isKindOfClass:NSDictionary.class]) state.spaceRules.push_back({Text(item[@"pattern"]),Text(item[@"spaceID"])});
   state.activeSpaceID = Text(value[@"activeSpaceID"]); state.activeTabID = Text(value[@"activeTabID"]);
   state.idleMinutes = Number(value[@"idleMinutes"],10); state.sidebarVisible = ReadBoolean(value[@"sidebarVisible"],true);
@@ -36,7 +36,7 @@ bool SaveState(NSString *directory, const BrowserModel &model, NSError **error) 
   NSMutableArray *sessions = [NSMutableArray array], *spaces = [NSMutableArray array], *tabs = [NSMutableArray array], *rules = [NSMutableArray array];
   for (const auto &s : model.state.sessions) [sessions addObject:@{@"id":S(s.id),@"name":S(s.name)}];
   for (const auto &s : model.state.spaces) [spaces addObject:@{@"id":S(s.id),@"name":S(s.name),@"sessionID":S(s.sessionID),@"selectedTabID":S(s.selectedTabID),@"icon":S(s.icon)}];
-  for (const auto &t : model.state.tabs) [tabs addObject:@{@"id":S(t.id),@"spaceID":S(t.spaceID),@"sessionID":S(t.sessionID),@"title":S(t.title),@"url":S(t.url),@"pinned":@(t.pinned),@"pinnedURL":S(t.pinnedURL),@"pinnedTitle":S(t.pinnedTitle),@"customTitle":S(t.customTitle)}];
+  for (const auto &t : model.state.tabs) [tabs addObject:@{@"id":S(t.id),@"spaceID":S(t.spaceID),@"sessionID":S(t.sessionID),@"title":S(t.title),@"url":S(t.url),@"pinned":@(t.pinned),@"pinnedURL":S(t.pinnedURL),@"pinnedTitle":S(t.pinnedTitle),@"customTitle":S(t.customTitle),@"snoozedUntil":@(t.snoozedUntil)}];
   for (const auto &r : model.state.spaceRules) [rules addObject:@{@"pattern":S(r.pattern),@"spaceID":S(r.spaceID)}];
   NSDictionary *state = @{@"version":@1,@"sessions":sessions,@"spaces":spaces,@"tabs":tabs,@"spaceRules":rules,@"activeSpaceID":S(model.state.activeSpaceID),@"activeTabID":S(model.state.activeTabID),@"idleMinutes":@(model.state.idleMinutes),@"sidebarVisible":@(model.state.sidebarVisible),@"sidebarWidth":@(model.state.sidebarWidth),@"controlSize":S(model.state.controlSize),@"sidebarAnimation":S(model.state.sidebarAnimation),@"theme":S(model.state.theme),@"devToolsDocked":@(model.state.devToolsDocked),@"devToolsWidth":@(model.state.devToolsWidth)};
   NSData *data = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted error:error];

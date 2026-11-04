@@ -22,6 +22,10 @@ int main() {
       original.state.sidebarWidth = 300; original.state.controlSize = "large"; original.state.sidebarAnimation = "subtle"; original.state.devToolsDocked = false;
       original.setSpaceRules("personal", {"dev.azure.com/contoso/**"});
       original.space("research")->icon = "leaf";
+      auto snoozedID = original.addTab(original.state.activeSpaceID,"https://example.com/later",1);
+      original.selectTab(tabID,1);
+      double snoozedUntil = round(NSDate.date.timeIntervalSince1970)+3600;
+      Check(original.snoozeTabs({snoozedID},snoozedUntil,1), "snooze failed");
       NSError *error = nil;
       Check(rail::SaveState(directory,original,&error), "save failed");
       rail::BrowserModel restored;
@@ -35,6 +39,7 @@ int main() {
       Check(restored.tab(tabID)->sessionID == rail::BrowserModel::isolatedSessionID(tabID), "isolated session lost");
       Check(restored.spaceForURL("https://dev.azure.com/contoso/x") == "personal", "Space rules lost");
       Check(restored.space("research")->icon == "leaf", "Space icon lost");
+      Check(restored.tab(snoozedID) && restored.tab(snoozedID)->snoozedUntil == snoozedUntil, "snooze time lost");
       Check(restored.state.controlSize == "large", "control size lost");
       Check(restored.state.sidebarAnimation == "subtle" && !restored.state.devToolsDocked, "sidebar animation or DevTools placement lost");
       Check(restored.tab(tabID)->pinned && !restored.state.sidebarVisible && restored.state.idleMinutes == 30 && restored.state.sidebarWidth == 300, "preferences lost");

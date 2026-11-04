@@ -42,6 +42,9 @@ Rail uses its own **Rail Safe Storage** Keychain entry for Chromium's cookie enc
 | New / close tab | **⌘ T** / **⌘ W** |
 | Open a link in a background tab | **Middle-click** or **⌘ click**; hold **Shift** to select the new tab |
 | Reopen closed tab | **⌘ Z** right after closing, or **⇧ ⌘ T** any time |
+| Select several tabs | **⌘ click** adds or removes a tab, **⇧ click** selects a range, **Esc** clears. Pinned tabs aren't part of a selection |
+| Act on selected tabs | Right-click a selected tab to close, snooze or move them; **⌘ W** closes them, and dragging one onto a Space moves them all |
+| Snooze tabs | Right-click → **Snooze Tab**. They unload and return to their place at the chosen time; **Snoozed** below the tab list shows them until then |
 | Reload | **⌘ R** |
 | Back / forward | **⌘ [** / **⌘ ]** |
 | Find in page | **⌘ F** opens the live find bar with highlighted matches and a match count; press again to select the query |

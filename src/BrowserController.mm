@@ -124,6 +124,11 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)saveNow;
 - (void)ensureBrowser:(const std::string &)tabID;
 - (void)closeRuntime:(const std::string &)tabID reason:(CloseReason)reason session:(const std::string &)session;
+- (std::vector<std::string>)tabsForAction:(const std::string &)tabID;
+- (void)closeTabs:(std::vector<std::string>)ids;
+- (void)moveTabs:(const std::vector<std::string> &)ids toSpace:(const std::string &)spaceID;
+- (void)modifiedClickTab:(const std::string &)tabID flags:(NSEventModifierFlags)flags;
+- (NSMenu *)snoozeMenuForTab:(const std::string &)tabID;
 - (void)selectTabID:(const std::string &)tabID;
 - (void)navigateTo:(NSString *)address;
 - (void)processAutomation;
@@ -131,6 +136,27 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)checkProjects:(BOOL)force;
 - (NSMenu *)projectMenuForTab:(std::string)tabID;
 @end
+
+// When a snooze choice from the tab menu ends, worked out at the moment it is chosen.
+static double SnoozeTime(NSString *choice) {
+  NSDate *now=NSDate.date; NSCalendar *calendar=NSCalendar.currentCalendar;
+  if ([choice isEqual:@"hour"]) return now.timeIntervalSince1970+3600;
+  if ([choice isEqual:@"later"]) return now.timeIntervalSince1970+3*3600;
+  NSDate *tomorrow=[calendar startOfDayForDate:[calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0]];
+  if ([choice isEqual:@"tomorrow"]) return [calendar dateBySettingHour:9 minute:0 second:0 ofDate:tomorrow options:0].timeIntervalSince1970;
+  // Searching from tomorrow keeps "Next Monday" honest when today is Monday.
+  NSDateComponents *monday=[[NSDateComponents alloc] init]; monday.weekday=2; monday.hour=9;
+  NSDate *next=[calendar nextDateAfterDate:tomorrow matchingComponents:monday options:NSCalendarMatchNextTime];
+  return next.timeIntervalSince1970;
+}
+// When a snoozed tab returns: the time today, otherwise the day or date.
+static NSString *SnoozeLabel(double until, BOOL full) {
+  NSDate *date=[NSDate dateWithTimeIntervalSince1970:until]; NSCalendar *calendar=NSCalendar.currentCalendar;
+  NSInteger days=[calendar components:NSCalendarUnitDay fromDate:[calendar startOfDayForDate:NSDate.date] toDate:[calendar startOfDayForDate:date] options:0].day;
+  NSDateFormatter *formatter=[[NSDateFormatter alloc] init];
+  [formatter setLocalizedDateFormatFromTemplate:days<=0 ? @"jm" : days<7 ? (full ? @"EEEjm" : @"EEE") : (full ? @"MMMdjm" : @"MMMd")];
+  return [formatter stringFromDate:date];
+}
 
 @implementation BrowserController {
   AppUpdater *_updater;
@@ -169,6 +195,10 @@ NSString *NormalizedAddress(NSString *input) {
   BOOL _automation, _quitting, _editingAddress, _savingAllowed, _historyDirty, _deletingAddress;
   // ⌘Z reopens a closed tab only until the user types again; after that it undoes text as usual.
   BOOL _undoCloseArmed;
+  // Tabs picked with ⌘ or ⇧ click, and where the next ⇧ click extends from. Not saved.
+  std::set<std::string> _tabSelection;
+  std::string _selectionAnchor;
+  BOOL _snoozedExpanded;
   // Set while docked DevTools pass on a shortcut, which arrives from their own window.
   BOOL _forwardingDevToolsShortcut;
   rail::History _history;
@@ -519,6 +549,11 @@ NSString *NormalizedAddress(NSString *input) {
   for (NSView *v in [_tabDocument.subviews copy]) [v removeFromSuperview];
   [_tabDocument addSubview:_dropIndicator];
   CGFloat y = 4; NSUInteger pins = 0, sleeping = 0;
+  // A selection only covers tabs on show: it ends with a Space switch or when its tabs go.
+  const auto listedTabs = _model.listedTabs(_model.state.activeSpaceID);
+  const auto isListed = [&](const std::string &id) { return std::find(listedTabs.begin(),listedTabs.end(),id)!=listedTabs.end(); };
+  std::erase_if(_tabSelection,[&](const std::string &id) { return !isListed(id); });
+  if (!isListed(_selectionAnchor)) _selectionAnchor.clear();
   {
     // The Space's two pages: its projects and the user's own pull requests.
     NSUInteger attention = [self attentionCountInSpace:_model.state.activeSpaceID], needsYou = [self activityCountInSpace:_model.state.activeSpaceID];
@@ -544,7 +579,7 @@ NSString *NormalizedAddress(NSString *input) {
     }
     y += 8;
   }
-  for (const auto &t : _model.state.tabs) if (t.spaceID == _model.state.activeSpaceID && !_runtime.count(t.id) && t.url != "about:blank") sleeping++;
+  for (const auto &t : _model.state.tabs) if (t.spaceID == _model.state.activeSpaceID && !t.snoozed() && !_runtime.count(t.id) && t.url != "about:blank") sleeping++;
   NSTextField *pinHeading = RailLabel(@"Pinned",10,NSFontWeightSemibold,RailMuted()); pinHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:pinHeading]; y += 24;
   for (const auto &tab : _model.state.tabs) {
     if (tab.spaceID != _model.state.activeSpaceID || !tab.pinned) continue;
@@ -564,14 +599,16 @@ NSString *NormalizedAddress(NSString *input) {
   _pinnedSectionEnd = y;
   NSTextField *tabHeading = RailLabel(@"Tabs",10,NSFontWeightSemibold,RailMuted()); tabHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:tabHeading]; y += 23;
   for (const auto &tab : _model.state.tabs) {
-    if (tab.spaceID != _model.state.activeSpaceID || tab.pinned) continue;
-    std::string tid = tab.id; BOOL selected = tid == _model.state.activeTabID && !_homeVisible;
-    RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,35)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=selected ? RailTint(RailRoleSelected) : nil; row.menu=[self menuForTab:tid];
+    if (tab.spaceID != _model.state.activeSpaceID || tab.pinned || tab.snoozed()) continue;
+    std::string tid = tab.id; BOOL selected = tid == _model.state.activeTabID && !_homeVisible, picked = !selected && _tabSelection.count(tid);
+    RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,35)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES; row.fill=selected ? RailTint(RailRoleSelected) : picked ? RailTint(RailRolePressed) : nil; row.menu=[self menuForTab:tid];
     BOOL sleepingTab = !_runtime.count(tid) && tab.url != "about:blank";
     RailButton *button = RailAction(S(tab.title),sleepingTab ? @"moon" : SymbolForURL(tab.url),[NSString stringWithFormat:@"%@%@",S(tab.title),sleepingTab ? @", unloaded; reload on open" : @""],^{ [weak selectTabID:tid]; });
     [self applyFaviconFor:tab.url button:button sleeping:sleepingTab]; button.dragTabID = S(tid); button.dragView = row;
     button.frame = NSMakeRect(0,0,side-40,35); button.font=RailFont(12,selected ? NSFontWeightSemibold : NSFontWeightRegular); button.ink=selected ? RailTint(RailRoleSelectedInk) : sleepingTab ? RailMuted() : RailInk();
-    if (selected) button.hoverFill=RailTint(RailRoleSelectedHover); button.menu=row.menu; [row addSubview:button];
+    if (selected) button.hoverFill=RailTint(RailRoleSelectedHover); else if (picked) button.hoverFill=NSColor.clearColor;
+    button.onModifiedClick = ^(NSEventModifierFlags flags) { [weak modifiedClickTab:tid flags:flags]; };
+    button.menu=row.menu; [row addSubview:button];
     NSString *sessionName = [self sessionName:tab.sessionID]; NSString *initial = sessionName.length ? [[sessionName substringToIndex:1] uppercaseString] : @"W";
     RailButton *badge = RailAction(initial,nil,[NSString stringWithFormat:@"%@ session; change session",sessionName],nil);
     __weak RailButton *weakBadge = badge; badge.handler = ^{ [weak showSessionMenuForTab:tid from:weakBadge]; };
@@ -586,6 +623,26 @@ NSString *NormalizedAddress(NSString *input) {
     [_tabDocument addSubview:row]; y += 38;
   }
   RailButton *newTab = RailAction(@"New tab",@"plus",@"New tab (⌘ T)",^{ [weak newTab:nil]; }); newTab.ink=RailMuted(); newTab.frame=NSMakeRect(9,y+8,side-18,33); [_tabDocument addSubview:newTab]; y += 54;
+  // Snoozed tabs stay out of the way: one quiet line until it is opened, and nothing when there are none.
+  NSUInteger snoozedCount = std::count_if(_model.state.tabs.begin(),_model.state.tabs.end(),[&](const rail::Tab &t) { return t.spaceID==_model.state.activeSpaceID && t.snoozed(); });
+  if (snoozedCount) {
+    RailButton *toggle = RailAction([NSString stringWithFormat:@"Snoozed · %lu",(unsigned long)snoozedCount],_snoozedExpanded ? @"chevron.down" : @"chevron.right",_snoozedExpanded ? @"Hide snoozed tabs" : @"Show snoozed tabs",^{ BrowserController *strong = weak; if (!strong) return; strong->_snoozedExpanded=!strong->_snoozedExpanded; [strong refresh]; });
+    toggle.ink=RailMuted(); toggle.frame=NSMakeRect(9,y-8,side-18,30); [_tabDocument addSubview:toggle]; y += 24;
+    if (_snoozedExpanded) for (const auto &tab : _model.state.tabs) {
+      if (tab.spaceID != _model.state.activeSpaceID || !tab.snoozed()) continue;
+      std::string tid = tab.id;
+      RailPanel *row = [[RailPanel alloc] initWithFrame:NSMakeRect(7,y,side-14,32)]; row.wantsLayer=YES; row.layer.cornerRadius=7; row.layer.masksToBounds=YES;
+      NSMenu *menu = [[NSMenu alloc] init];
+      for (NSArray *entry in @[@[@"Return to Tabs",@"wakeTabMenu:"],@[@"Close Tab",@"closeTabMenu:"]]) { NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:entry[0] action:NSSelectorFromString(entry[1]) keyEquivalent:@""]; item.target=self; item.representedObject=S(tid); [menu addItem:item]; }
+      row.menu=menu;
+      RailButton *button = RailAction(S(tab.title),@"moon",[NSString stringWithFormat:@"%@, snoozed until %@; open now",S(tab.title),SnoozeLabel(tab.snoozedUntil,YES)],^{ [weak selectTabID:tid]; });
+      [self applyFaviconFor:tab.url button:button sleeping:YES]; button.frame=NSMakeRect(0,0,side-14-58,32); button.ink=RailMuted(); button.menu=menu; [row addSubview:button];
+      NSTextField *when = RailLabel(SnoozeLabel(tab.snoozedUntil,NO),10,NSFontWeightRegular,RailMuted()); when.font=RailDigitsFont(10,NSFontWeightRegular); when.alignment=NSTextAlignmentRight;
+      when.frame=NSMakeRect(side-14-58,9,50,14); [row addSubview:when];
+      [_tabDocument addSubview:row]; y += 34;
+    }
+    y += 10;
+  }
   // Fill the visible area exactly; a fraction more makes a scaled sidebar show a scroller that narrows the rows.
   _tabDocument.frame=NSMakeRect(0,0,side,MAX(y,floor(_tabScroll.contentView.bounds.size.height))); [_tabScroll.contentView scrollToPoint:NSMakePoint(0,MIN(offset.y,MAX(0,y-_tabScroll.contentSize.height)))];
   _sleepLabel.stringValue=[NSString stringWithFormat:@"%lu asleep · after %.0f min",(unsigned long)sleeping,_model.state.idleMinutes];
@@ -622,6 +679,16 @@ NSString *NormalizedAddress(NSString *input) {
 }
 - (NSMenu *)menuForTab:(const std::string &)tabID {
   const auto *tab = _model.tab(tabID); NSMenu *menu = [[NSMenu alloc] init]; if (!tab) return menu;
+  // A tab in a selection offers what applies to all of it; each action works out the tabs when chosen.
+  const NSUInteger count = [self tabsForAction:tabID].size();
+  if (count>1) {
+    NSMenuItem *close = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Close %lu Tabs",(unsigned long)count] action:@selector(closeTabMenu:) keyEquivalent:@""]; close.target=self; close.representedObject=S(tabID); [menu addItem:close];
+    NSMenuItem *snooze = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Snooze %lu Tabs",(unsigned long)count] action:nil keyEquivalent:@""]; snooze.submenu=[self snoozeMenuForTab:tabID]; [menu addItem:snooze];
+    NSMenuItem *move = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Move %lu Tabs to Space",(unsigned long)count] action:nil keyEquivalent:@""]; move.submenu=[[NSMenu alloc] init];
+    for (const auto &space : _model.state.spaces) if (space.id!=tab->spaceID) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:S(space.name) action:@selector(moveTabMenu:) keyEquivalent:@""]; item.target=self; item.representedObject=@{@"tab":S(tabID),@"space":S(space.id)}; [move.submenu addItem:item]; }
+    [menu addItem:move];
+    return menu;
+  }
   NSMutableArray *entries = [NSMutableArray arrayWithObject:@[tab->pinned ? @"Unpin Tab" : @"Pin Tab",@"pinTab:"]];
   if (tab->pinned) [entries addObject:@[@"Rename Tab…",@"renameTabMenu:"]];
   [entries addObjectsFromArray:@[@[@"Unload Tab",@"unloadTab:"],@[@"Close Tab",@"closeTabMenu:"]]];
@@ -631,13 +698,46 @@ NSString *NormalizedAddress(NSString *input) {
   NSMenuItem *move = [[NSMenuItem alloc] initWithTitle:@"Move to Space" action:nil keyEquivalent:@""]; move.submenu=[[NSMenu alloc] init];
   for (const auto &space : _model.state.spaces) if (space.id!=tab->spaceID) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:S(space.name) action:@selector(moveTabMenu:) keyEquivalent:@""]; item.target=self; item.representedObject=@{@"tab":S(tabID),@"space":S(space.id)}; [move.submenu addItem:item]; }
   [menu addItem:move];
+  if (!tab->pinned) { NSMenuItem *snooze=[[NSMenuItem alloc] initWithTitle:@"Snooze Tab" action:nil keyEquivalent:@""]; snooze.submenu=[self snoozeMenuForTab:tabID]; [menu addItem:snooze]; }
   if (rail::isWebURL(tab->url)) { NSMenuItem *projects=[[NSMenuItem alloc] initWithTitle:@"Add to Project" action:nil keyEquivalent:@""]; projects.submenu=[self projectMenuForTab:tabID]; [menu addItem:projects]; }
   if (rail::isWebURL(tab->url)) { NSMenuItem *save=[[NSMenuItem alloc] initWithTitle:@"Save to Reading List" action:@selector(saveTabToReading:) keyEquivalent:@""]; save.target=self; save.representedObject=S(tabID); [menu addItem:save]; }
   return menu;
 }
+- (NSMenu *)snoozeMenuForTab:(const std::string &)tabID {
+  NSMenu *menu=[[NSMenu alloc] init];
+  for (NSArray *entry in @[@[@"In 1 Hour",@"hour"],@[@"In 3 Hours",@"later"],@[@"Tomorrow Morning",@"tomorrow"],@[@"Next Monday",@"monday"]]) {
+    NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(snoozeTabMenu:) keyEquivalent:@""]; item.target=self; item.representedObject=@{@"tab":S(tabID),@"choice":entry[1]}; [menu addItem:item];
+  }
+  return menu;
+}
+// The tabs an action on this tab covers: its whole selection, or just the tab when it is outside one.
+- (std::vector<std::string>)tabsForAction:(const std::string &)tabID {
+  if (_tabSelection.size()<2 || !_tabSelection.count(tabID)) return {tabID};
+  std::vector<std::string> ids;
+  for (const auto &id : _model.listedTabs(_model.state.activeSpaceID)) if (_tabSelection.count(id)) ids.push_back(id);
+  return ids;
+}
+// ⌘ click adds or removes one tab and ⇧ click selects up to it from the last one clicked. Neither changes the page on show.
+- (void)modifiedClickTab:(const std::string &)tabID flags:(NSEventModifierFlags)flags {
+  // The tab on show is where a selection starts, as in other browsers, unless it can't be part of one.
+  const auto *shown=_homeVisible || _readingVisible ? nullptr : _model.tab(_model.state.activeTabID);
+  const std::string active=shown && !shown->pinned ? shown->id : "";
+  if (flags & NSEventModifierFlagShift) {
+    if (_selectionAnchor.empty()) _selectionAnchor=active.empty() ? tabID : active;
+    const auto range=_model.tabRange(_model.state.activeSpaceID,_selectionAnchor,tabID);
+    if (!(flags & NSEventModifierFlagCommand)) _tabSelection.clear();
+    _tabSelection.insert(range.begin(),range.end());
+  } else {
+    if (_tabSelection.empty() && !active.empty()) _tabSelection.insert(active);
+    if (tabID==active && _tabSelection.size()==1) {} else if (!_tabSelection.erase(tabID)) _tabSelection.insert(tabID);
+    _selectionAnchor=tabID;
+  }
+  [self refresh];
+}
 - (void)selectTabID:(const std::string &)tabID {
   if (tabID!=_passwordTab) [_passwordPalette invalidatePage];
   if (_quitting || !_model.selectTab(tabID,Now())) return;
+  _tabSelection.clear(); _selectionAnchor.clear();
   _homeVisible=NO; _readingVisible=NO;
   _statusMessage=nil; [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
   auto it=_runtime.find(tabID); if (it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None) it->second.browser->GetHost()->SetFocus(true);
@@ -1060,6 +1160,9 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)setStatus:(NSString *)message { _statusMessage=[message copy]; _statusLabel.stringValue=message ?: @""; }
 - (void)checkIdle {
   if (_quitting) return;
+  // Woken tabs come back unloaded and don't take over the page.
+  const auto woken=_model.wakeDueTabs(Now());
+  if (!woken.empty()) { [self setStatus:woken.size()==1 ? @"A snoozed tab is back." : [NSString stringWithFormat:@"%lu snoozed tabs are back.",(unsigned long)woken.size()]]; [self refresh]; [self saveSoon]; }
   for (const auto &id : _model.idleTabs(Now())) {
     auto it=_runtime.find(id); if (it!=_runtime.end() && it->second.closeReason==CloseReason::None) [self closeRuntime:id reason:CloseReason::Idle session:""];
   }
@@ -1097,20 +1200,43 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (!tab || index>=_model.state.spaces.size() || _model.state.spaces[index].id==tab->spaceID) { _railDropIndicator.hidden=YES; return NSDragOperationNone; }
   if (drop) {
     std::string id=tab->id, space=_model.state.spaces[index].id; __weak BrowserController *weak=self;
-    dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (!strong || !strong->_model.moveTab(id,space,Now())) return; [strong ensureBrowser:strong->_model.state.activeTabID]; [strong refresh]; [strong saveSoon]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (strong) [strong moveTabs:[strong tabsForAction:id] toSpace:space]; });
     _railDropIndicator.hidden=YES; return NSDragOperationMove;
   }
   _railDropIndicator.frame=NSInsetRect(target.frame,-3,-3); _railDropIndicator.hidden=NO; return NSDragOperationMove;
 }
 - (void)resizeSidebarTo:(CGFloat)delta { _model.state.sidebarWidth=std::clamp<double>(_dragStartWidth+delta/rail::BrowserModel::controlScale(_model.state.controlSize),180,420); [self refresh]; }
-- (void)newTab:(id)sender { (void)sender; if (_quitting) return; _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now()); [self refresh]; [self saveSoon]; [self focusAddress:nil]; }
+- (void)newTab:(id)sender { (void)sender; if (_quitting) return; _homeVisible=NO; _readingVisible=NO; _tabSelection.clear(); _selectionAnchor.clear(); auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now()); [self refresh]; [self saveSoon]; [self focusAddress:nil]; }
 - (void)closeCurrentTab:(id)sender {
   (void)sender;
   if (NSApp.keyWindow && NSApp.keyWindow!=_window) { [NSApp.keyWindow performClose:nil]; return; }
   // No tab is showing, so ⌘W leaves Reading instead of closing one out of sight.
   if (_readingVisible) { [self showReading:nil]; return; }
+  if (_tabSelection.size()>1) { [self closeTabs:[self tabsForAction:*_tabSelection.begin()]]; return; }
   [self closeTabID:_model.state.activeTabID];
 }
+// The tab on show goes last, so closing it never brings up a tab that is about to close and load it for nothing.
+- (void)closeTabs:(std::vector<std::string>)ids {
+  if (ids.size()>1) { _tabSelection.clear(); _selectionAnchor.clear(); }
+  std::stable_partition(ids.begin(),ids.end(),[&](const std::string &id) { return id!=_model.state.activeTabID; });
+  for (const auto &id : ids) [self closeTabID:id];
+}
+- (void)moveTabs:(const std::vector<std::string> &)ids toSpace:(const std::string &)spaceID {
+  // Moving the tab on show follows it to the new Space, where the old selection must not carry on.
+  if (ids.size()>1) { _tabSelection.clear(); _selectionAnchor.clear(); }
+  for (const auto &id : ids) _model.moveTab(id,spaceID,Now());
+  [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon];
+}
+- (void)snoozeTabMenu:(NSMenuItem *)sender {
+  const auto ids=[self tabsForAction:C(sender.representedObject[@"tab"])]; const double until=SnoozeTime(sender.representedObject[@"choice"]);
+  if (!_model.snoozeTabs(ids,until,Now())) return;
+  if (ids.size()>1) { _tabSelection.clear(); _selectionAnchor.clear(); }
+  // Unloaded like an idle tab: the page reloads when it is opened again.
+  for (const auto &id : ids) { auto it=_runtime.find(id); if (it!=_runtime.end() && it->second.closeReason==CloseReason::None) [self closeRuntime:id reason:CloseReason::Idle session:""]; }
+  [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon];
+  [self setStatus:[NSString stringWithFormat:@"%@ until %@.",ids.size()==1 ? @"Snoozed" : [NSString stringWithFormat:@"%lu tabs snoozed",(unsigned long)ids.size()],SnoozeLabel(until,YES)]];
+}
+- (void)wakeTabMenu:(NSMenuItem *)sender { if (_model.wakeTab(C(sender.representedObject),Now())) { [self refresh]; [self saveSoon]; } }
 - (void)closeTabID:(const std::string &)tabID {
   _undoCloseArmed=YES;
   if (_runtime.count(tabID)) [self closeRuntime:tabID reason:CloseReason::Delete session:""];
@@ -1120,7 +1246,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (_quitting) return;
   if (_switcherTabs.empty()) {
     std::vector<const rail::Tab *> tabs;
-    for (const auto &tab : _model.state.tabs) if (tab.spaceID==_model.state.activeSpaceID) tabs.push_back(&tab);
+    for (const auto &tab : _model.state.tabs) if (tab.spaceID==_model.state.activeSpaceID && !tab.snoozed()) tabs.push_back(&tab);
     if (tabs.size()<2) return;
     const std::string active=_model.state.activeTabID;
     std::stable_sort(tabs.begin(),tabs.end(),[&](const rail::Tab *a, const rail::Tab *b) { if ((a->id==active)!=(b->id==active)) return a->id==active; return a->lastUsed>b->lastUsed; });
@@ -1148,13 +1274,14 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 - (void)reopenClosedTab:(id)sender {
   (void)sender; if (_quitting) return;
   std::string id=_model.reopenClosedTab(Now()); if (id.empty()) return;
+  _tabSelection.clear(); _selectionAnchor.clear();
   // A pinned tab may still be loaded; send it back to the page it was on.
   auto it=_runtime.find(id); const auto *tab=_model.tab(id);
   if (tab && it!=_runtime.end() && it->second.browser && it->second.closeReason==CloseReason::None) it->second.browser->GetMainFrame()->LoadURL(tab->url);
   [self ensureBrowser:id]; [self refresh]; [self saveSoon];
   if (it!=_runtime.end() && it->second.browser) it->second.browser->GetHost()->SetFocus(true);
 }
-- (void)closeTabMenu:(NSMenuItem *)sender { [self closeTabID:C(sender.representedObject)]; }
+- (void)closeTabMenu:(NSMenuItem *)sender { [self closeTabs:[self tabsForAction:C(sender.representedObject)]]; }
 - (void)pinTab:(NSMenuItem *)sender { _model.togglePin(C(sender.representedObject)); [self refresh]; [self saveSoon]; }
 - (void)renameTabMenu:(NSMenuItem *)sender { [self renameTabID:C(sender.representedObject)]; }
 // Pinned tabs keep a chosen name until they are unpinned; an empty name shows the page title again.
@@ -1168,7 +1295,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (id==_model.state.activeTabID) { [self setStatus:@"Switch to another tab before unloading this one."]; return; }
   [self closeRuntime:id reason:CloseReason::Idle session:""];
 }
-- (void)moveTabMenu:(NSMenuItem *)sender { _model.moveTab(C(sender.representedObject[@"tab"]),C(sender.representedObject[@"space"]),Now()); [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon]; }
+- (void)moveTabMenu:(NSMenuItem *)sender { [self moveTabs:[self tabsForAction:C(sender.representedObject[@"tab"])] toSpace:C(sender.representedObject[@"space"])]; }
 - (void)toggleSidebar:(id)sender {
   (void)sender; _model.state.sidebarVisible=!_model.state.sidebarVisible; [self saveSoon];
   [_sidebarTimer invalidate]; _sidebarTimer=nil;
@@ -1541,6 +1668,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   if (event.keyCode==48 && (flags & NSEventModifierFlagControl) && !(flags & NSEventModifierFlagCommand)) { [self cycleRecentTabs:(flags & NSEventModifierFlagShift) ? -1 : 1]; return YES; }
   if (!_switcherTabs.empty() && event.keyCode==53) { [self finishTabSwitch:NO]; return YES; }
   if (!_findBar.hidden && event.keyCode==53) { [self closeFind:nil]; return YES; }
+  if (!_tabSelection.empty() && !_editingAddress && event.keyCode==53) { _tabSelection.clear(); _selectionAnchor.clear(); [self refresh]; return YES; }
   if (!_findBar.hidden && _findField.currentEditor && (event.keyCode==36 || event.keyCode==76) && !(flags & (NSEventModifierFlagCommand|NSEventModifierFlagControl|NSEventModifierFlagOption))) {
     [self searchPageForward:!(flags & NSEventModifierFlagShift) next:YES]; return YES;
   }
@@ -1563,7 +1691,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   else if ([key isEqual:@"q"]) [self quit:nil];
   else if (key.integerValue>=1 && key.integerValue<=9) {
     NSInteger target=key.integerValue-1,count=0;
-    for (const auto &tab:_model.state.tabs) if (tab.spaceID==_model.state.activeSpaceID) { if (count++==target) { [self selectTabID:tab.id]; break; } }
+    for (const auto &tab:_model.state.tabs) if (tab.spaceID==_model.state.activeSpaceID && !tab.snoozed()) { if (count++==target) { [self selectTabID:tab.id]; break; } }
   } else return NO;
   return YES;
 }
