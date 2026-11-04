@@ -10,6 +10,7 @@
 - (void)start;
 - (void)quit:(id)sender;
 - (BOOL)handleShortcut:(NSEvent *)event;
+- (BOOL)pageIsCovered;
 - (void)passwordReply:(CefRefPtr<CefProcessMessage>)message tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)passwordPageNavigating:(const std::string &)tab generation:(uint64_t)generation;
 - (void)openExternalURLs:(NSArray<NSURL *> *)urls;

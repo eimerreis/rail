@@ -80,7 +80,7 @@ class RailApp final : public CefApp, public CefBrowserProcessHandler {
 class RailClient final : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler,
   public CefLoadHandler, public CefRequestHandler, public CefKeyboardHandler,
   public CefPermissionHandler, public CefDownloadHandler, public CefJSDialogHandler,
-  public CefContextMenuHandler, public CefFindHandler {
+  public CefContextMenuHandler, public CefFindHandler, public CefFocusHandler {
  public:
   RailClient(BrowserController *controller, std::string tabID, uint64_t generation)
       : controller_(controller), tabID_(std::move(tabID)), generation_(generation) {}
@@ -94,6 +94,12 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+  CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+  // A page starting or navigating behind Reading or Home must not take the keyboard from them.
+  bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource) override {
+    CEF_REQUIRE_UI_THREAD();
+    return [controller_ pageIsCovered];
+  }
   void OnFindResult(CefRefPtr<CefBrowser>, int identifier, int count, const CefRect &,
       int ordinal, bool finalUpdate) override {
     CEF_REQUIRE_UI_THREAD();

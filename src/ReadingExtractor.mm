@@ -156,7 +156,7 @@ class FaviconReader final : public CefDownloadImageCallback {
 };
 
 class ExtractionClient final : public CefClient, public CefLifeSpanHandler, public CefLoadHandler, public CefRequestHandler,
-  public CefJSDialogHandler, public CefDisplayHandler, public CefDevToolsMessageObserver {
+  public CefJSDialogHandler, public CefDisplayHandler, public CefFocusHandler, public CefDevToolsMessageObserver {
  public:
   ExtractionClient(ReadingExtractor *owner, uint64_t generation) : owner_(owner), generation_(generation) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -164,6 +164,9 @@ class ExtractionClient final : public CefClient, public CefLifeSpanHandler, publ
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+  CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+  // These pages are never shown, so they never get the keyboard.
+  bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource) override { return true; }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { [owner_ browserCreated:browser generation:generation_]; }
   bool DoClose(CefRefPtr<CefBrowser>) override { [owner_ browserClosing:generation_]; return true; }

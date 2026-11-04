@@ -710,6 +710,7 @@ NSString *NormalizedAddress(NSString *input) {
   std::string tabID=pending->second; _pendingPopups.erase(pending);
   auto slot=_runtime.find(tabID); if (slot!=_runtime.end() && !slot->second.browser) [self browserClosed:tabID generation:slot->second.generation];
 }
+- (BOOL)pageIsCovered { return _homeVisible || _readingVisible; }
 - (void)browserCreated:(CefRefPtr<CefBrowser>)browser tab:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID);
   if (it==_runtime.end() || it->second.generation!=generation) { browser->GetHost()->CloseBrowser(true); return; }
