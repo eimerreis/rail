@@ -47,6 +47,7 @@
 // Where Tab goes after the last row.
 @property(nonatomic, weak) NSView *exitKeyView;
 - (BOOL)rowIsVisible:(NSString *)itemID;
+- (NSDictionary *)feedsLayout;
 - (void)reload;
 - (void)scrollRowIntoView:(NSString *)itemID;
 @end

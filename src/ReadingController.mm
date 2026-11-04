@@ -435,7 +435,7 @@ static NSString *DisplayHost(NSString *url) { return S(rail::ReadingList::siteOf
   NSMutableArray *items = [NSMutableArray array], *feeds = [NSMutableArray array];
   for (const auto &item : _list.state.items) [items addObject:@{@"id":S(item.id),@"url":S(item.url),@"title":S(item.title),@"site":S(item.site),@"feed":S(item.feedID),@"session":S(item.sessionID),@"read":@(item.readAt>0),@"minutes":@(item.minutes),@"progress":@(item.progress),@"reader":@(rail::readerStatusName(item.reader))}];
   for (const auto &feed : _list.state.feeds) [feeds addObject:@{@"id":S(feed.id),@"url":S(feed.url),@"title":S(feed.title),@"error":S(feed.error),@"unread":@(_list.unreadCount(feed.id))}];
-  return @{@"items":items,@"feeds":feeds,@"selected":_selectedID ?: @"",@"unread":@(self.unreadCount),@"showingRead":@(_showingRead),@"filter":_feedFilter ?: @"",@"shownRows":@(_sidebar.rows.count),@"activeSession":self.activeSession ?: @"",@"readerOffset":@(_reader.scrollOffset),@"selectedRowVisible":@([_sidebar rowIsVisible:_selectedID ?: @""]),@"focus":[self focusDescription]};
+  return @{@"items":items,@"feeds":feeds,@"selected":_selectedID ?: @"",@"unread":@(self.unreadCount),@"showingRead":@(_showingRead),@"filter":_feedFilter ?: @"",@"shownRows":@(_sidebar.rows.count),@"activeSession":self.activeSession ?: @"",@"readerOffset":@(_reader.scrollOffset),@"selectedRowVisible":@([_sidebar rowIsVisible:_selectedID ?: @""]),@"feedsLayout":[_sidebar feedsLayout],@"focus":[self focusDescription]};
 }
 - (NSString *)focusDescription {
   NSResponder *responder = _reader.window.firstResponder;
@@ -456,6 +456,7 @@ static NSString *DisplayHost(NSString *url) { return S(rail::ReadingList::siteOf
   else if ([action isEqual:@"readingRemove"]) [self removeItem:itemID];
   else if ([action isEqual:@"readingAddFeed"]) [self addFeed:command[@"url"] ?: @""];
   else if ([action isEqual:@"readingCheckFeeds"]) [self checkFeeds];
+  else if ([action isEqual:@"readingRemoveFeed"]) [self removeFeed:command[@"feed"] ?: @""];
   else if ([action isEqual:@"readingFilter"]) { _feedFilter = [command[@"feed"] length] ? command[@"feed"] : nil; [self refreshViews]; }
   else if ([action isEqual:@"readingSession"]) [self setSelectedSessionTo:command[@"session"] ?: @""];
   else if ([action isEqual:@"readingReload"]) [self reloadSelected];
