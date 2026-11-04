@@ -22,6 +22,7 @@
 @property(nonatomic, copy) NSString *reason;
 @property(nonatomic) ProjectTone reasonTone;
 @property(nonatomic) ProjectTone checksTone;     // the list glyph
+@property(nonatomic) ProjectTone changedTone;    // tints the row just after its checks changed; Neutral for none
 @property(nonatomic) NSInteger stage;            // 0 needs you, 1 waiting on others, 2 ready to merge
 @property(nonatomic) NSInteger provider;         // 1 Azure DevOps, 2 GitHub
 @property(nonatomic, copy) NSString *openTitle;  // "Open in Azure DevOps"

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Live checks · B · Checks dock</title>
+<link rel="stylesheet" href="live.css">
+<style>
+/* B · Checks dock: a sidebar section, next to the tabs. Nothing floats; a row changes in place and stays until you have seen it. */
+.dock{padding:0 8px}
+.dock .sec{padding:14px 6px 6px}
+.dock .sec button{font-weight:530;color:var(--muted);font-size:10.5px}
+.drow{display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:8px;padding:7px 8px;border-radius:8px;font-size:11.5px;align-items:start}
+.drow + .drow{margin-top:1px}
+.drow .ck{width:15px;height:15px;margin-top:1px}
+.drow b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.drow small{grid-column:2/-1;display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:var(--muted);margin-top:2px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.drow small span:first-child{overflow:hidden;text-overflow:ellipsis}
+.drow .bar2{grid-column:2/-1;height:3px;border-radius:2px;background:var(--line);margin-top:6px;overflow:hidden}
+.drow .bar2 i{display:block;height:100%;background:var(--info-dot);border-radius:2px}
+.drow .x{width:16px;height:16px;color:var(--muted);display:grid;place-items:center}
+.drow .x svg{width:10px;height:10px}
+.drow.fail{background:var(--crit-fill)}
+.drow.fail b{color:var(--crit)}
+.drow.done{background:var(--ok-fill)}
+.drow.done b{color:var(--ok)}
+.side .pins{grid-template-columns:1fr 1fr}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script>
+const U = n => '<svg class="i"><use href="#'+n+'"/></svg>';
+const CK = s => s==='run' ? '<span class="ck run"></span>' : '<span class="ck '+s+'">'+U(s==='ok'?'check':'x')+'</span>';
+const ADO = '<span class="fav ado">'+U('ado')+'</span>', GH = '<span class="fav gh">'+U('github')+'</span>';
+const row=(cls,g,t,m,e,extra="",x=false)=>`<div class="drow ${cls}">${CK(g)}<b>${t}</b>${x?`<button class="x" aria-label="Dismiss">${U("x")}</button>`:"<span></span>"}<small><span>${m}</span><span>${e}</span></small>${extra}</div>`;
+const pct=p=>`<div class="bar2" role="progressbar" aria-valuenow="${p}"><i style="width:${p}%"></i></div>`;
+window.LIVE = {
+  rail:`<span class="pip"></span>`,
+  sideAfterNav:`<div class="dock"><div class="sec"><span>Checks  4</span><button>Clear finished</button></div>
+    ${row("fail","fail","Integration tests failed","License Service !1187","now","",true)}
+    ${row("done","ok","Checks passed","Status Page #88","3 m","",true)}
+    ${row("","run","e2e","Customer Portal !611","4 m of ~7 m",pct(57))}
+    ${row("","run","test","Webhook Relay #214","1 m of ~2 m",pct(50))}
+  </div>`
+};
+</script>
+<script src="live.js"></script>
+</body>
+</html>

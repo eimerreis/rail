@@ -65,6 +65,7 @@ NSString *StageTitle(NSInteger stage) { return stage == 0 ? @"Needs you" : stage
   (void)dirty;
   NSBezierPath *shape = [NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:8 yRadius:8];
   if (_selectedRow) { [RailTint(RailRoleSelected) setFill]; [shape fill]; }
+  else if (_item.changedTone != ProjectToneNeutral) { [ProjectToneFill(_item.changedTone) setFill]; [shape fill]; }
   else if (_hovered) { [RailTint(RailRoleContentHover) setFill]; [shape fill]; }
   if (self.window.firstResponder == self) { [RailTint(RailRoleFocus) setStroke]; NSBezierPath *ring = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,1,1) xRadius:7 yRadius:7]; ring.lineWidth = 2; [ring stroke]; }
   CGFloat w = NSWidth(self.bounds);

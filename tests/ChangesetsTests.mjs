@@ -98,7 +98,7 @@ test('the actual CLI batches patch and minor changes into one native app version
   assert.equal(checkChange(cwd, `${sha}^`, sha).kind, 'version');
   // CMake consumes the version without running Node or maintaining a second version file.
   copyFileSync(join(root, 'CMakeLists.txt'), join(cwd, 'CMakeLists.txt'));
-  for (const name of ['BrowserModel', 'History', 'Projects', 'Reading']) for (const ext of ['cpp', 'h']) {
+  for (const name of ['BrowserModel', 'History', 'Projects', 'Reading', 'TrackedRuns']) for (const ext of ['cpp', 'h']) {
     write(cwd, `src/${name}.${ext}`, read(root, `src/${name}.${ext}`));
   }
   const cmake = existsSync(join(root, '.tools/bin/cmake')) ? join(root, '.tools/bin/cmake') : 'cmake';

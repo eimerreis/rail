@@ -28,8 +28,8 @@ A browser shaped around one developer's own working day rather than a general au
 
 ## Capabilities and Constraints
 
-- Shipped: Spaces rail, vertical tabs with multi-select and snoozing, pinned shortcuts, named and isolated sessions, idle unloading (1–60 min), find, history, a global reading list with a plain reader view and feeds, persistence in `~/Library/Application Support/Rail/`.
-- Exploring (not built): a developer project overview showing per-project environment links with health, pipeline status, alerts/telemetry needing attention, and whether local dev servers are running.
+- Shipped: Spaces rail, vertical tabs with multi-select and snoozing, pinned shortcuts, named and isolated sessions, idle unloading (1–60 min), find, history, a global reading list with a plain reader view and feeds, a project overview with Activity that refresh on their own, a toolbar capsule following the user's own pull requests and manually started pipelines, persistence in `~/Library/Application Support/Rail/`.
+- Exploring (not built): alerts and telemetry needing attention on the project overview; a webhook relay for instant check updates (issue #4).
 - Decided: the overview is a per-Space home with one card per project; each project belongs to exactly one Space. Data model, entry paths and status fetching: `docs/plans/2026-10-29-projects-model.md`.
 - Remote pages have no application or filesystem bridge; any overview data source must respect that boundary.
 - No extension compatibility is claimed.

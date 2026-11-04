@@ -203,7 +203,7 @@ All fetching is native code started by the app; remote pages still have no bridg
 
 Requests that carry a session's login are restricted: GET only, only to `dev.azure.com` and `*.visualstudio.com`, and only to the `_apis` paths listed below. A user-entered URL never causes a request that carries a login.
 
-**When:** only for the Space whose home is visible. Checks run on open, then every 60 s for health and every 2 min for providers, and immediately on "Check now". Failures back off to 5 min. Nothing is fetched for Spaces not on screen.
+**When:** health checks run only for the Space whose home is visible, on open and then every 60 s. Providers are checked for every Space, whatever is on screen: about every 2 min, about every 20 s for a source with something of the user's running, and immediately on "Check now". Checks stop while a provider has asked Rail to slow down: Azure DevOps through `Retry-After` or a 429, GitHub through `Retry-After`, a 429, or fewer than 100 requests remaining. GitHub requests send `If-None-Match`, so unchanged answers don't count against its rate limit.
 
 **Local environments:** a TCP connect to host:port with a 1 s timeout gives `up` or `notRunning`. If `healthPath` is set, an HTTP GET follows.
 

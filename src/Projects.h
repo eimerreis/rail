@@ -92,8 +92,10 @@ struct EnvironmentStatus {
 };
 
 struct PipelineRun {
-    std::string name, number, branch, result, url; // result: succeeded|failed|running|canceled|queued
+    std::string name, number, branch, result, url; // result: succeeded|failed|running|canceled|queued, and waiting for runs in myRuns
     double finishedAt = 0;
+    std::string id, definitionID;    // set for runs in myRuns
+    double startedAt = 0;
 };
 
 // A required step on the way to merge: a build or status check, or (Azure DevOps) a branch policy.
@@ -104,6 +106,7 @@ struct PullRequestCheck {
     std::string detail;
     std::string url;
     bool blocking = true;
+    double startedAt = 0;
 };
 
 struct PullRequestReviewer {
@@ -121,7 +124,7 @@ struct PullRequest {
     int openThreads = -1;            // -1 = unknown
     std::vector<PullRequestCheck> checks;
     std::vector<PullRequestReviewer> reviewers;
-    std::string detailsSHA;          // GitHub: the head commit whose checks apply
+    std::string detailsSHA;          // the head commit whose checks apply
 };
 
 enum class PullRequestStage { needsYou, waiting, ready };
@@ -135,10 +138,12 @@ struct SourceStatus {
     std::vector<PipelineRun> runs;   // latest run of each pipeline on the default branch, newest first
     std::vector<PullRequest> myPullRequests; // open pull requests created by the connection's user
     bool myPullRequestsKnown = false;
+    std::vector<PipelineRun> myRuns; // latest run of each pipeline the connection's user started by hand, on any branch
     int openPullRequests = -1;       // -1 = unknown
     std::string defaultBranch;
     std::string pullRequestsURL;
     double checkedAt = 0;
+    double readAt = 0;               // the last check that returned without an error
     std::string error;
     bool notCovered = false;         // GitHub: no installation can see the repo
 };
@@ -148,6 +153,7 @@ struct ConnectionStatus {
     std::string account;             // as the provider reports it
     std::string userID;              // Azure DevOps: the signed-in identity, to find the user's own pull requests
     std::string error;
+    bool throttled = false;          // the provider asked Rail to slow down
 };
 
 struct StatusSnapshot {
@@ -163,8 +169,15 @@ Health healthFromHTTP(int status, bool redirectedToOtherHost, int latencyMs);
 std::string azureBuildResult(const std::string& status, const std::string& result);
 std::string githubRunResult(const std::string& status, const std::string& conclusion);
 std::string githubCheckState(const std::string& status, const std::string& conclusion);
+// A run the user started: like githubRunResult, but it tells apart a run held for approval.
+std::string githubMyRunResult(const std::string& status, const std::string& conclusion);
 std::string azurePolicyState(const std::string& status);
 std::string azureVote(int vote);
+// Seconds between checks of a source: short while something of the user's is running.
+constexpr int RunningPollSeconds = 20, IdlePollSeconds = 115;
+int sourcePollSeconds(const SourceStatus& source);
+// Everything the pages show from a snapshot, without timings, to tell whether a check changed anything.
+std::string statusSignature(const StatusSnapshot& status);
 // What an Azure DevOps response in a session says about its login.
 Access azureAccess(int status, const std::string& location, const std::string& mime, const std::string& displayName);
 

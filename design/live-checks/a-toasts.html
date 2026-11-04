@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Live checks · A · Toasts</title>
+<link rel="stylesheet" href="live.css">
+<style>
+/* A · Toasts: events float over whatever you are doing, bottom right. A toast only appears when what it says is not already on screen. */
+.stack{position:absolute;bottom:12px;right:12px;width:352px;display:grid;gap:8px;z-index:5}
+.toast{background:var(--raised);border-radius:12px;box-shadow:var(--float);padding:12px 12px 12px 14px;display:grid;grid-template-columns:18px minmax(0,1fr) 22px;column-gap:10px;font-size:12px}
+.toast b{display:block;font-weight:650}
+.toast .m{grid-column:2;font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.toast .x{width:22px;height:22px;margin:-3px -3px 0 0;color:var(--faint);display:grid;place-items:center;border-radius:6px}
+.toast .x svg{width:12px;height:12px}
+.toast .a{grid-column:2/-1;display:flex;gap:6px;margin-top:10px}
+.toast.fail{background:#FDF3EE;box-shadow:var(--float),inset 0 0 0 1px #EDCDC1}
+.toast.fail b{color:var(--crit)}
+.r{background:var(--raised);border-radius:12px;box-shadow:var(--float);padding:10px 12px 8px 14px;font-size:11px}
+.r h3{margin:0 0 6px;font-size:11px;font-weight:650;display:flex;justify-content:space-between;align-items:center}
+.r h3 span{font-weight:450;color:var(--muted);display:inline-flex;gap:4px;align-items:center}
+.r h3 svg{width:10px;height:10px}
+.r div{display:flex;align-items:center;gap:8px;height:24px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.r .ck{width:13px;height:13px}
+.r .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.r .e{color:var(--muted)}
+.toast .fav{display:inline-grid;vertical-align:-3px;margin-right:5px;width:14px;height:14px}.t .fav svg{width:10px;height:10px}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script>
+const U = n => '<svg class="i"><use href="#'+n+'"/></svg>';
+const CK = s => s==='run' ? '<span class="ck run"></span>' : '<span class="ck '+s+'">'+U(s==='ok'?'check':'x')+'</span>';
+const ADO = '<span class="fav ado">'+U('ado')+'</span>', GH = '<span class="fav gh">'+U('github')+'</span>';
+window.LIVE = {
+  overlay:{
+    web:`<div class="stack" role="status" aria-label="Notifications">
+      <div class="toast fail">${CK("fail")}<b>Integration tests failed</b><button class="x" aria-label="Dismiss">${U("x")}</button>
+        <div class="m">${ADO}License Service !1187 · Handle transferred seats</div>
+        <div class="a"><button class="btn tint">Open run</button><button class="btn line">Show in Activity</button></div></div>
+      <div class="toast">${CK("ok")}<b>Checks passed · ready to merge</b><button class="x" aria-label="Dismiss">${U("x")}</button>
+        <div class="m">${GH}Status Page #88 · Bump Next.js to 15.5</div></div>
+      <div class="r"><h3>2 checks running <span>Activity ${U("chevron")}</span></h3>
+        <div>${CK("run")}<span class="n">Customer Portal !611 · e2e</span><span class="e">4 m</span></div>
+        <div>${CK("run")}<span class="n">Webhook Relay #214 · test</span><span class="e">1 m</span></div></div>
+    </div>`,
+    activity:`<div class="stack" role="status"><div class="toast">${CK("ok")}<b>Deploy to PROD passed</b><button class="x" aria-label="Dismiss">${U("x")}</button>
+        <div class="m"><span class="mk p" style="margin-right:6px;height:15px">Personal</span>Website · run #311</div></div></div>`,
+    projects:`<div class="stack" role="status"><div class="toast">${CK("ok")}<b>Checks passed · ready to merge</b><button class="x" aria-label="Dismiss">${U("x")}</button>
+        <div class="m">${GH}Status Page #88 · Bump Next.js to 15.5</div></div></div>`
+  }
+};
+</script>
+<script src="live.js"></script>
+</body>
+</html>

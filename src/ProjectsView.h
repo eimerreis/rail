@@ -58,6 +58,7 @@ NSImage *ProjectStateSymbol(ProjectTone tone, CGFloat size);
 @property(nonatomic) BOOL needsAttention;
 @property(nonatomic) BOOL runsLocally;
 @property(nonatomic) BOOL moving;               // a pipeline or deployment is under way
+@property(nonatomic) ProjectTone changedTone;   // tints the lane just after one of the user's runs changed; Neutral for none
 @property(nonatomic, strong) NSMenu *menu;
 @end
 

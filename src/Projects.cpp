@@ -232,6 +232,34 @@ std::string azureVote(int vote) {
     return "none";
 }
 
+std::string githubMyRunResult(const std::string& status, const std::string& conclusion) {
+    if (status == "waiting" || (status == "completed" && conclusion == "action_required")) return "waiting";
+    return githubRunResult(status, conclusion);
+}
+int sourcePollSeconds(const SourceStatus& source) {
+    for (const auto& run : source.myRuns) if (run.result == "running" || run.result == "queued") return RunningPollSeconds;
+    for (const auto& pr : source.myPullRequests) {
+        const auto checks = pullRequestChecks(pr);
+        if (checks == "running" || checks == "pending") return RunningPollSeconds;
+    }
+    return IdlePollSeconds;
+}
+std::string statusSignature(const StatusSnapshot& status) {
+    std::string out;
+    for (const auto& [id, environment] : status.environments) out += id + '=' + std::to_string(static_cast<int>(environment.health)) + environment.version + ';';
+    for (const auto& [id, connection] : status.connections) out += id + '=' + std::to_string(static_cast<int>(connection.access)) + (connection.throttled ? "t" : "") + ';';
+    for (const auto& [key, source] : status.sources) {
+        out += key + '=' + source.error + (source.notCovered ? "n" : "") + std::to_string(source.openPullRequests) + ';';
+        for (const auto& run : source.runs) out += run.name + run.number + run.result + ',';
+        for (const auto& run : source.myRuns) out += run.id + run.result + ',';
+        for (const auto& pr : source.myPullRequests) {
+            out += pr.id + pr.title + (pr.conflicts ? "c" : "") + (pr.draft ? "d" : "") + std::to_string(pr.openThreads) + ',';
+            for (const auto& check : pr.checks) out += check.name + check.state + ',';
+            for (const auto& reviewer : pr.reviewers) out += reviewer.name + reviewer.vote + ',';
+        }
+    }
+    return out;
+}
 std::string pullRequestChecks(const PullRequest& pr) {
     bool any = false, running = false, pending = false;
     for (const auto& check : pr.checks) {

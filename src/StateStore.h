@@ -3,6 +3,7 @@
 #include "History.h"
 #include "Projects.h"
 #include "Reading.h"
+#include "TrackedRuns.h"
 
 namespace rail {
 bool LoadState(NSString *directory, BrowserModel &model, NSError **error);
@@ -15,4 +16,7 @@ bool SaveProjects(NSString *directory, const Projects &projects, NSError **error
 // reading.json: saved links can't be recreated either, so it is treated like projects.json.
 bool LoadReading(NSString *directory, ReadingList &reading, NSError **error);
 bool SaveReading(NSString *directory, const ReadingList &reading, NSError **error);
+// tracked-runs.json: what the user has acknowledged. Providers can restate the rest, so an unreadable file starts empty.
+bool LoadTrackedRuns(NSString *directory, TrackedRuns &runs);
+bool SaveTrackedRuns(NSString *directory, const TrackedRuns &runs, NSError **error);
 }

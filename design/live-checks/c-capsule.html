@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rail — Live checks · C · Capsule</title>
+<link rel="stylesheet" href="live.css">
+<style>
+/* C · Capsule: one toolbar control carries every check. It announces an event by widening for a few seconds, then settles back to counts. Click for the full list. */
+.cap{display:inline-flex;align-items:center;gap:10px;height:30px;padding:0 11px;border-radius:15px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--line);font-size:11.5px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;margin-right:4px}
+.cap span{display:inline-flex;gap:6px;align-items:center}
+.cap .ck{width:14px;height:14px}
+.cap.open{background:var(--selected);box-shadow:inset 0 0 0 1px var(--accent)}
+.cap.say{background:var(--crit-fill);box-shadow:none;color:var(--crit);padding-right:4px;gap:10px}
+.cap.say em{font-style:normal;font-weight:450;color:var(--ink)}
+.cap.say .btn{height:22px;border-radius:11px;background:var(--raised);color:var(--ink);padding:0 9px}
+.pop{position:absolute;top:6px;right:48px;width:400px;background:var(--raised);border-radius:12px;box-shadow:var(--float);z-index:5;padding:6px 0 8px;font-size:12px}
+.pop h3{margin:0;padding:10px 14px 5px;font-size:10.5px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between}
+.pop h3 button{color:var(--muted);font-weight:530}
+.q{display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:10px;padding:8px 14px;align-items:center}
+.q .ck{margin-top:1px;align-self:start}
+.q b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q small{display:block;font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.q .e{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;align-self:start}
+.q.bad{background:#FDF3EE}
+.q.bad b{color:var(--crit)}
+.q.bad .a{grid-column:2/-1;display:flex;gap:6px;margin-top:8px}
+.pop hr{border:0;border-top:1px solid var(--line-soft);margin:6px 0 0}
+</style>
+</head>
+<body>
+<script src="../project-overview/icons.js"></script>
+<script>
+const U = n => '<svg class="i"><use href="#'+n+'"/></svg>';
+const CK = s => s==='run' ? '<span class="ck run"></span>' : '<span class="ck '+s+'">'+U(s==='ok'?'check':'x')+'</span>';
+const ADO = '<span class="fav ado">'+U('ado')+'</span>', GH = '<span class="fav gh">'+U('github')+'</span>';
+const capsule=`<span>${CK("run")}2</span><span>${CK("fail")}1</span><span>${CK("ok")}1</span>`;
+const q=(cls,g,t,m,e,extra="")=>`<div class="q ${cls}">${CK(g)}<div style="min-width:0"><b>${t}</b><small>${m}</small></div><span class="e">${e}</span>${extra}</div>`;
+window.LIVE = {
+  barExtra:{
+    web:`<button class="cap open" aria-label="Checks: 2 running, 1 failed, 1 passed" aria-expanded="true">${capsule}</button>`,
+    activity:`<button class="cap say" aria-label="Integration tests failed">${CK("fail")}<span>Integration tests failed <em>· License Service !1187</em></span><span class="btn">Open run</span></button>`,
+    projects:`<button class="cap" aria-label="Checks: 2 running, 1 failed, 1 passed">${capsule}</button>`
+  },
+  overlay:{
+    web:`<div class="pop" role="dialog" aria-label="Checks">
+      <h3>Failed</h3>
+      ${q("bad","fail","Integration tests failed","License Service !1187 · Handle transferred seats","now",`<div class="a"><button class="btn tint">Open run</button><button class="btn line">Show in Activity</button></div>`)}
+      <h3>Running  2</h3>
+      ${q("","run","e2e","Customer Portal !611 · Add invoice download","4 m")}
+      ${q("","run","test","Webhook Relay #214 · Add jitter to delivery backoff","1 m")}
+      <h3>Finished <button>Clear</button></h3>
+      ${q("","ok","Checks passed · ready to merge","Status Page #88 · Bump Next.js to 15.5","3 m")}
+      ${q("","ok",`Deploy to PROD passed`,`Personal · Website run #311`,"12 m")}
+    </div>`
+  }
+};
+</script>
+<script src="live.js"></script>
+</body>
+</html>
