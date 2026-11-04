@@ -20,11 +20,11 @@ const articleBody = Array.from({ length: 40 }, (_, i) => paragraph(i + 1)).join(
 const page = (title, body, head = '') => `<!doctype html><meta charset="utf-8"><title>${title}</title>${head}<body><nav><a href="/">Home</a><a href="/about">About</a></nav>${body}<footer>Footer text that must not be read</footer></body>`;
 const feedRequests = { count: 0 };
 let extraEntry = '';
-const rss = (origin) => {
-  const items = Array.from({ length: 8 }, (_, i) => `<item><title>Feed post ${i + 1}</title><link>${origin}/post/${i + 1}</link><guid>post-${i + 1}</guid><pubDate>${new Date(Date.UTC(2026, 9, 20 + i)).toUTCString()}</pubDate></item>`).join('');
-  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Fixture Feed</title><link>${origin}/</link>${extraEntry}${items}</channel></rss>`;
+const rss = (origin, name = 'Fixture Feed', post = 'post') => {
+  const items = Array.from({ length: 8 }, (_, i) => `<item><title>Feed post ${i + 1}</title><link>${origin}/${post}/${i + 1}</link><guid>${post}-${i + 1}</guid><pubDate>${new Date(Date.UTC(2026, 9, 20 + i)).toUTCString()}</pubDate></item>`).join('');
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>${name}</title><link>${origin}/</link>${extraEntry}${items}</channel></rss>`;
 };
-let feedBroken = false, flakyFailed = false;
+let feedBroken = false, flakyFailed = false, brokenExtraFeed = 0;
 const fixture = createServer((req, res) => {
   const origin = `http://${req.headers.host}`;
   const html = (body, status = 200) => { res.writeHead(status, { 'Content-Type': 'text/html' }); res.end(body); };
@@ -41,6 +41,8 @@ const fixture = createServer((req, res) => {
   if (req.url === '/hostile') return html(page('Hostile', `<article>${articleBody}<script>window.open('/popup');alert('hello');location.href='javascript:void(0)'</script></article>`));
   if (req.url === '/slow') return setTimeout(() => html(page('Slow', '<p>Eventually.</p>')), 30000);
   if (req.url === '/feed.xml') { feedRequests.count++; if (feedBroken) return html('nope', 500); res.writeHead(200, { 'Content-Type': 'application/rss+xml' }); return res.end(rss(origin)); }
+  const extraFeed = req.url.match(/^\/feed-(\d)\.xml$/);
+  if (extraFeed) { if (Number(extraFeed[1]) === brokenExtraFeed) return html('nope', 500); res.writeHead(200, { 'Content-Type': 'application/rss+xml' }); return res.end(rss(origin, `Extra feed ${extraFeed[1]}`, `extra-${extraFeed[1]}`)); }
   if (req.url === '/blog') return html(page('Blog', '<p>Blog home</p>', '<link rel="alternate" type="application/rss+xml" href="/feed.xml">'));
   return html(page(req.url, '<p>Plain page</p>'));
 });
@@ -377,6 +379,34 @@ try {
   await stop();
   assert.ok((await import('node:fs')).readdirSync(profile).some(f => f.startsWith('reading-recovery-')));
   passed('a damaged reading list is kept as a recovery copy');
+
+  // More feeds than the list shows: a classic scrollbar must not cover rows, unread counts or Retry.
+  s = await start();
+  await command('reading');
+  const addExtraFeed = async (n) => { await command('readingAddFeed', { url: `${origin}/feed-${n}.xml` }); return until(`extra feed ${n}`, async () => { const v = await state(); return v.reading.feeds.length === n && v; }); };
+  const feedsFill = (width) => until('feed rows fill the list', async () => {
+    const l = (await state()).reading.feedsLayout;
+    assert.equal(l.overflows, false); assert.equal(l.visibleWidth, width ?? l.visibleWidth); assert.equal(l.documentWidth, l.visibleWidth); assert.equal(l.right, l.visibleWidth - 7);
+    return l;
+  }, 5000);
+  const feedsClear = () => until('feed rows clear the scrollbar', async () => {
+    const l = (await state()).reading.feedsLayout;
+    assert.equal(l.overflows, true); assert.equal(l.documentWidth, l.visibleWidth); assert.ok(l.right <= l.visibleWidth - 7, `rows reach ${l.right} of ${l.visibleWidth} visible`);
+    return l;
+  }, 5000);
+  for (let n = 1; n <= 5; n++) await addExtraFeed(n);
+  const { visibleWidth: fullWidth } = await feedsFill();
+  await addExtraFeed(6);
+  await feedsClear();
+  brokenExtraFeed = 6;
+  await command('readingCheckFeeds');
+  s = await until('extra feed error', async () => { const v = await state(); return v.reading.feeds.find(f => f.error) && v; });
+  await feedsClear();
+  await shot('reading-feeds-overflow');
+  await command('readingRemoveFeed', { feed: s.reading.feeds.find(f => f.error).id });
+  await feedsFill(fullWidth);
+  await stop();
+  passed('feed rows stay clear of a classic scrollbar, and take the full width again once they fit');
 
   console.log(`\n${checks} reading checks passed. Screenshots: ${profile}/reading-*.png`);
 } catch (error) {

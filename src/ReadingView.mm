@@ -179,6 +179,10 @@ NSImageView *MetaIcon(NSString *symbol, NSColor *ink) {
   _empty.stringValue = self.emptyText ?: @""; _empty.hidden = self.rows.count>0;
   for (NSView *v in [_feedsDocument.subviews copy]) [v removeFromSuperview];
   CGFloat y = 2, w = self.bounds.size.width;
+  _feedsHeight = y; for (ReadingFeedRow *feed in self.feedRows) _feedsHeight += feed.problem.length ? 42 : 26;
+  [self layoutContents];
+  // Feed rows are laid out as they are built, so the width a classic scrollbar takes has to be known first.
+  if (_feedsHeight+4 > floor(_feeds.contentSize.height) && _feeds.scrollerStyle == NSScrollerStyleLegacy) w -= [NSScroller scrollerWidthForControlSize:_feeds.verticalScroller.controlSize scrollerStyle:NSScrollerStyleLegacy];
   for (ReadingFeedRow *feed in self.feedRows) {
     const CGFloat rowHeight = feed.problem.length ? 42 : 26;
     ReadingRowView *view = [[ReadingRowView alloc] initWithFrame:NSMakeRect(7,y,w-14,rowHeight)];
@@ -197,8 +201,6 @@ NSImageView *MetaIcon(NSString *symbol, NSColor *ink) {
     if (feed.unread) { NSTextField *count = RailLabel([NSString stringWithFormat:@"%lu",(unsigned long)feed.unread],10,NSFontWeightRegular,Sub()); count.alignment = NSTextAlignmentRight; count.frame = NSMakeRect(w-14-39,6,30,14); [view addSubview:count]; }
     [_feedsDocument addSubview:view]; y += rowHeight;
   }
-  _feedsHeight = y;
-  [self layoutContents];
   _feedsDocument.frame = NSMakeRect(0,0,w,MAX(y+4,_feeds.contentSize.height));
   // Tab runs from the paste field through the items and feeds.
   NSView *previous = _capture.field;
@@ -208,6 +210,10 @@ NSImageView *MetaIcon(NSString *symbol, NSColor *ink) {
   }
   previous.nextKeyView = self.exitKeyView ?: _capture.field;
   if (focusedRow) [self.window makeFirstResponder:focusedRow];
+}
+- (NSDictionary *)feedsLayout {
+  CGFloat right = 0; for (NSView *row in _feedsDocument.subviews) right = MAX(right,NSMaxX(row.frame));
+  return @{@"right":@(right),@"documentWidth":@(_feedsDocument.frame.size.width),@"visibleWidth":@(_feeds.contentSize.width),@"overflows":@(_feedsDocument.frame.size.height > _feeds.contentSize.height)};
 }
 - (BOOL)rowIsVisible:(NSString *)itemID {
   NSUInteger index = [_shownRowIDs indexOfObject:itemID]; if (index == NSNotFound || index >= _listDocument.subviews.count) return NO;
