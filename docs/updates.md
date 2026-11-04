@@ -54,6 +54,8 @@ Chromium updates travel in a complete Rail update. The CEF headers, C++ wrapper,
 
 The engine proposal needs **Allow GitHub Actions to create and approve pull requests** in repository Actions settings. PRs created with the default `GITHUB_TOKEN` may require approval before their workflows run; the updater checks its staged changeset before opening the PR, and a human merge triggers the release pipeline on `main`. See [GitHub’s workflow-trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
+Every pull request also builds on an Apple Silicon macOS runner and runs the integration suites from `scripts/release-smoke.sh` as the **Smoke tests** check. It uses no signing identity or secrets, and a new push cancels the PR's earlier run.
+
 `.github/workflows/release.yml` publishes only after versioning:
 
 1. Validates change commits and runs the Changesets integration tests on Linux, then runs status/version and pushes the generated version commit to `main`. No pending changesets and no unpublished version means no release.
