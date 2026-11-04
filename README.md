@@ -197,7 +197,7 @@ Run `node scripts/passwords-smoke.mjs` after building. `RAIL_TEST_APP` can point
 - No extension manager, sync, full vault manager, history UI, default-browser registration, or automatic Chromium updater.
 - Named-session popups preserve `window.opener` for login flows. Popups from isolated tabs open with a fresh isolated profile; use a named session for login flows requiring a shared opener session.
 - Camera/microphone and common website permissions have native prompts. Screen sharing is not implemented. File downloads use a native save panel.
-- Chromium's sandbox and web security remain enabled. Invalid certificates and unsupported URL schemes are not bypassed. Desktop app links require confirmation; local file browsing and DRM compatibility are not implemented.
+- Chromium's sandbox and web security remain enabled. Invalid certificates and unsupported URL schemes are not bypassed. Desktop app links require confirmation. `file://` addresses and paths such as `~/Source/test.png` open from the address bar or from another local file, never from a web page. DRM compatibility is not implemented.
 - Updating Chromium is manual: update the matching version/archive/size/checksum fields in `cef.lock.json` from the [official CEF builds index](https://cef-builds.spotifycdn.com/index.json), then run the build and integration checks again. Old engine versions eventually become unsuitable for daily browsing.
 
 ## Source map

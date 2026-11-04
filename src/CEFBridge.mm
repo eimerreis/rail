@@ -37,6 +37,18 @@ constexpr int InspectElementCommand = MENU_ID_USER_FIRST;
 constexpr int OpenLinkCommand = MENU_ID_USER_FIRST + 1;
 constexpr int OpenImageCommand = MENU_ID_USER_FIRST + 2;
 constexpr int CopyImageCommand = MENU_ID_USER_FIRST + 3;
+// New tabs and popups can show a local file only when a local file asks for it, so a web
+// page can't use Rail's own browser-side navigation to get around Chromium's file:// block.
+bool RailOpenAllowedFrom(const CefString &url, const CefString &page) {
+  return RailNavigationAllowed(url) || (RailIsFileURL(url) && RailIsFileURL(page));
+}
+// The address bar, reloads, restored tabs and history may load a file. Links and forms may only from another file.
+bool FileNavigationAllowed(CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request) {
+  const int transition = request->GetTransitionType();
+  if (transition & TT_FORWARD_BACK_FLAG) return true;
+  const int source = transition & TT_SOURCE_MASK;
+  return (source != TT_LINK && source != TT_FORM_SUBMIT) || RailIsFileURL(frame->GetURL());
+}
 
 class CopyImageCallback final : public CefDownloadImageCallback {
  public:
@@ -117,10 +129,10 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> menu) override {
     CEF_REQUIRE_UI_THREAD();
     size_t index = 0;
-    if (!params->GetLinkUrl().empty() && RailNavigationAllowed(params->GetLinkUrl()))
+    if (!params->GetLinkUrl().empty() && RailOpenAllowedFrom(params->GetLinkUrl(), params->GetFrameUrl()))
       menu->InsertItemAt(index++, OpenLinkCommand, "Open Link in New Tab");
     if (params->GetMediaType() == CM_MEDIATYPE_IMAGE) {
-      if (!params->GetSourceUrl().empty() && RailNavigationAllowed(params->GetSourceUrl()))
+      if (!params->GetSourceUrl().empty() && RailOpenAllowedFrom(params->GetSourceUrl(), params->GetFrameUrl()))
         menu->InsertItemAt(index++, OpenImageCommand, "Open Image in New Tab");
       menu->InsertItemAt(index++, CopyImageCommand, "Copy Image");
       menu->SetEnabled(CopyImageCommand, params->HasImageContents() && !params->GetSourceUrl().empty());
@@ -138,7 +150,7 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
     CEF_REQUIRE_UI_THREAD();
     if (commandID == OpenLinkCommand || commandID == OpenImageCommand) {
       const CefString url = commandID == OpenLinkCommand ? params->GetLinkUrl() : params->GetSourceUrl();
-      if (!url.empty() && RailNavigationAllowed(url))
+      if (!url.empty() && RailOpenAllowedFrom(url, params->GetFrameUrl()))
         [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:YES];
       return true;
     }
@@ -167,7 +179,7 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       CefRefPtr<CefDictionaryValue> &, bool *) override {
     CEF_REQUIRE_UI_THREAD();
     if (!gesture) return true;
-    if (!url.empty() && !RailNavigationAllowed(url)) {
+    if (!url.empty() && !RailOpenAllowedFrom(url, frame ? frame->GetURL() : CefString())) {
       [controller_ requestExternalAppURL:S(url) fromPage:frame ? S(frame->GetURL()) : @"" tab:tabID_ generation:generation_];
       return true;
     }
@@ -200,7 +212,8 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
     CEF_REQUIRE_UI_THREAD();
     if (frame->IsMain()) [controller_ passwordPageNavigating:tabID_ generation:generation_];
     const CefString url = request->GetURL();
-    if (!RailNavigationAllowed(url) && (frame->IsMain() || RailIsExternalAppURL(url))) {
+    const bool allowed = RailNavigationAllowed(url) || (RailIsFileURL(url) && frame->IsMain() && FileNavigationAllowed(frame, request));
+    if (!allowed && (frame->IsMain() || RailIsExternalAppURL(url))) {
       // Auth redirects often have no user gesture. The native prompt supplies
       // consent for top-level navigation; hidden frames cannot initiate it.
       if (frame->IsMain() || gesture)
@@ -212,7 +225,7 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   bool OnOpenURLFromTab(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, const CefString &url,
       WindowOpenDisposition disposition, bool gesture) override {
     CEF_REQUIRE_UI_THREAD();
-    if (RailNavigationAllowed(url)) {
+    if (RailOpenAllowedFrom(url, frame ? frame->GetURL() : CefString())) {
       if (disposition == CEF_WOD_NEW_BACKGROUND_TAB || disposition == CEF_WOD_NEW_FOREGROUND_TAB) {
         [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:disposition == CEF_WOD_NEW_BACKGROUND_TAB];
         return true;
@@ -309,6 +322,11 @@ bool RailNavigationAllowed(const CefString &url) {
   if ([address isEqualToString:@"about:blank"]) return true;
   NSString *scheme = [NSURLComponents componentsWithString:address].scheme.lowercaseString;
   return [scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"];
+}
+bool RailIsFileURL(const CefString &url) {
+  NSURLComponents *parts = [NSURLComponents componentsWithString:S(url)];
+  // A host would point at a network share, which is not a file on this Mac.
+  return [parts.scheme.lowercaseString isEqualToString:@"file"] && (!parts.host.length || [parts.host.lowercaseString isEqualToString:@"localhost"]);
 }
 bool RailIsExternalAppURL(const CefString &url) {
   NSURLComponents *parts = [NSURLComponents componentsWithString:S(url)];
