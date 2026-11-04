@@ -300,10 +300,11 @@ try {
   await command('reading');
   // The list is longer than the window here, so moving down has to scroll it.
   await command('readingSelect', { item: s.reading.items.filter(i => !i.read && i.reader === 'ready')[0].id });
-  const rows = (await state()).reading.shownRows;
+  const { shownRows: rows, selected: firstSelected } = (await state()).reading;
   let hidden = 0;
   for (let i = 0; i < rows; i++) { const v = await command('key', { chars: 'j' }); if (!v.reading.selectedRowVisible) hidden++; }
   assert.equal(hidden, 0);
+  assert.notEqual((await state()).reading.selected, firstSelected, 'J moves the selection after a restart');
   for (let i = 0; i < rows; i++) { const v = await command('key', { chars: 'k' }); if (!v.reading.selectedRowVisible) hidden++; }
   assert.equal(hidden, 0);
   passed('J and K keep the selected row in view');

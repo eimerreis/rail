@@ -719,7 +719,8 @@ NSString *NormalizedAddress(NSString *input) {
   if (it->second.closeReason!=CloseReason::None || _quitting) browser->GetHost()->CloseBrowser(_quitting);
   else {
     if (!it->second.pendingURL.empty()) { browser->GetMainFrame()->LoadURL(it->second.pendingURL); it->second.pendingURL.clear(); }
-    if (tabID==_model.state.activeTabID) browser->GetHost()->SetFocus(true);
+    // A page that finishes starting behind Reading or Home must not take the keyboard from them.
+    if (tabID==_model.state.activeTabID && !_homeVisible && !_readingVisible) browser->GetHost()->SetFocus(true);
   }
   [self refresh];
 }

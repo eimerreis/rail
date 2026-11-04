@@ -217,8 +217,8 @@ NSImageView *MetaIcon(NSString *symbol, NSColor *ink) {
   NSUInteger index = [_shownRowIDs indexOfObject:itemID]; if (index == NSNotFound || index >= _listDocument.subviews.count) return;
   [_listDocument scrollRectToVisible:NSInsetRect(_listDocument.subviews[index].frame,0,-6)];
 }
-- (void)layoutList {
-  CGFloat w = self.bounds.size.width, rowWidth = w-14, y = 2;
+- (CGFloat)layoutRowsInWidth:(CGFloat)w {
+  CGFloat rowWidth = w-14, y = 2;
   for (NSView *view in _listDocument.subviews) {
     if (![view isKindOfClass:ReadingRowView.class]) continue;
     NSTextField *title = nil, *meta = nil; NSImageView *icon = nil; NSView *track = nil, *tile = view.subviews.firstObject;
@@ -244,8 +244,17 @@ NSImageView *MetaIcon(NSString *symbol, NSColor *ink) {
     }
     view.frame = NSMakeRect(7,y,rowWidth,height); y += height+2;
   }
+  return y+6;
+}
+- (void)layoutList {
+  CGFloat w = self.bounds.size.width, shown = floor(_list.contentSize.height), height = [self layoutRowsInWidth:w];
+  // A classic scrollbar appears once the rows overflow and takes its width from the list; rows must not run underneath it.
+  if (height > shown && _list.scrollerStyle == NSScrollerStyleLegacy) {
+    w -= [NSScroller scrollerWidthForControlSize:_list.verticalScroller.controlSize scrollerStyle:NSScrollerStyleLegacy];
+    height = [self layoutRowsInWidth:w];
+  }
   // Fill the visible area exactly, so an unneeded scroller doesn't narrow the rows.
-  _listDocument.frame = NSMakeRect(0,0,w,MAX(y+6,floor(_list.contentSize.height)));
+  _listDocument.frame = NSMakeRect(0,0,w,MAX(height,shown));
 }
 @end
 
