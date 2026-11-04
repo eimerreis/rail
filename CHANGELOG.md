@@ -1,5 +1,11 @@
 # rail
 
+## 0.3.0
+
+### Minor Changes
+
+- e932d70: Select several tabs with ⌘ or ⇧ click to close, move or snooze them together, and snooze any unpinned tab until later.
+
 ## 0.2.1
 
 ### Patch Changes
