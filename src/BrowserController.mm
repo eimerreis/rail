@@ -8,6 +8,7 @@
 #import "ProjectsView.h"
 #import "ReadingController.h"
 #import "ActivityView.h"
+#import "ChecksCapsule.h"
 #import "SettingsWindow.h"
 #import "PasswordService.h"
 #import "PasswordPalette.h"
@@ -133,6 +134,7 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)navigateTo:(NSString *)address;
 - (void)processAutomation;
 - (void)refreshHome;
+- (void)toggleChecks:(id)sender;
 - (void)checkProjects:(BOOL)force;
 - (NSMenu *)projectMenuForTab:(std::string)tabID;
 @end
@@ -178,6 +180,18 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   BOOL _homeVisible, _projectsDirty, _projectsSavingAllowed, _statusRefreshQueued, _loadingRepositories;
   NSInteger _homeFilter;
   NSTimer *_statusTimer;
+  // Everything the Capsule follows, and what it is saying about it.
+  rail::TrackedRuns _runs;
+  std::string _runsSignature, _statusSignature, _transientRun;
+  std::vector<std::string> _announcedFailures, _queuedRuns;
+  NSTimer *_transientTimer, *_capsuleTimer;
+  CGFloat _capsuleWidth;
+  ChecksCapsule *_capsule;
+  ChecksListView *_checksList;
+  NSPopover *_checksPopover;
+  NSString *_updatedLabel;
+  BOOL _runsDirty, _runsFixture, _tinting;
+  std::vector<rail::RunWarning> _warningsFixture;
   std::unordered_map<std::string, RuntimeTab> _runtime;
   std::unordered_map<std::string, CefRefPtr<CefRequestContext>> _contexts;
   std::unordered_map<std::string, std::string> _pendingPopups;
@@ -256,6 +270,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
     NSError *error = nil;
     // Projects load first: tabs opened from a project may use profiles that projects own.
     _projectsSavingAllowed = YES;
+    rail::LoadTrackedRuns(_directory,_runs);
     if (!rail::LoadProjects(_directory,_projects,&error)) {
       NSString *path = [_directory stringByAppendingPathComponent:@"projects.json"];
       NSString *backup = [_directory stringByAppendingPathComponent:[NSString stringWithFormat:@"projects-recovery-%.0f.json",Now()]];
@@ -347,6 +362,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   _address = _addressBar.field;
   _address.placeholderString = @"Search or enter address"; _address.delegate = self; _address.target = self; _address.action = @selector(addressEntered:); _address.accessibilityLabel = @"Search or enter address";
   _downloadsButton = RailAction(@"",@"arrow.down.circle",@"Downloads",^{ [weak toggleDownloads:nil]; }); _downloadsButton.centered = YES; _downloadsButton.hidden = !_downloads.count; [_toolbar addSubview:_downloadsButton];
+  _capsule = [[ChecksCapsule alloc] initWithFrame:NSZeroRect]; _capsule.hidden = YES; _capsule.onToggle = ^{ [weak toggleChecks:nil]; }; [_toolbar addSubview:_capsule];
   _passwordButton = RailAction(@"",@"key",@"1Password (⇧ ⌘ P)",^{ [weak showPasswords:nil]; }); _passwordButton.centered=YES; [_toolbar addSubview:_passwordButton];
   _sessionPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO]; _sessionPicker.bordered = NO; _sessionPicker.font = RailFont(12,NSFontWeightMedium); _sessionPicker.menu.font = [NSFont menuFontOfSize:0]; _sessionPicker.target = self; _sessionPicker.action = @selector(sessionChosen:); _sessionPicker.accessibilityLabel = @"Session for current tab"; [_toolbar addSubview:_sessionPicker];
   _progress = [[NSProgressIndicator alloc] init]; _progress.style = NSProgressIndicatorStyleBar; _progress.indeterminate = YES; _progress.displayedWhenStopped = NO; [_toolbar addSubview:_progress];
@@ -380,7 +396,8 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   [self ensureBrowser:_model.state.activeTabID];
   [_reading start];
   _idleTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) { (void)timer; [weak checkIdle]; }];
-  _statusTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:YES block:^(NSTimer *timer) { (void)timer; BrowserController *strong = weak; if (strong && strong->_homeVisible && strong->_window.isVisible) [strong checkProjects:NO]; }];
+  _statusTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer) { (void)timer; [weak statusTick]; }];
+  [self updateTrackedRuns];
   if (_automation) _automationTimer = [NSTimer scheduledTimerWithTimeInterval:.1 repeats:YES block:^(NSTimer *timer) { (void)timer; [weak processAutomation]; }];
   [self saveSoon];
   if (_pendingExternalURLs.count) { NSArray *urls=_pendingExternalURLs; _pendingExternalURLs=nil; [self openExternalURLs:urls]; }
@@ -433,7 +450,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
 - (void)toggleAutomaticUpdateDownloads:(id)sender { (void)sender; _releaseUpdater.automaticallyDownloadsUpdates=!_releaseUpdater.automaticallyDownloadsUpdates; }
 - (void)installMenu {
   NSMenu *bar = [[NSMenu alloc] init]; NSApp.mainMenu = bar;
-  NSArray *groups = @[@[@"Rail",@[@"About Rail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Rail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Projects",@"showHome:",@"H"],@[@"Activity",@"showActivity:",@"A"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"1Password…",@"showPasswords:",@"P"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"],@[@"Dock Developer Tools",@"toggleDevToolsDock:",@"D"]]];
+  NSArray *groups = @[@[@"Rail",@[@"About Rail",@"about:",@""],@[@"Settings…",@"showSettings:",@","],@[@"Set as Default Browser…",@"makeDefaultBrowser:",@""],@[@"Reinstall Latest main",@"reinstallLatestMain:",@""],@[@"Quit Rail",@"quit:",@"q"]],@[@"File",@[@"New Tab",@"newTab:",@"t"],@[@"New Space…",@"newSpace:",@""],@[@"Projects",@"showHome:",@"H"],@[@"Activity",@"showActivity:",@"A"],@[@"Checks",@"toggleChecks:",@"K"],@[@"Add Project…",@"newProject:",@""],@[@"Add Current Page as Project",@"addCurrentPageAsProject:",@""],@[@"Save Page to Reading List",@"savePageToReading:",@"D"],@[@"Close Tab",@"closeCurrentTab:",@"w"],@[@"Reopen Closed Tab",@"reopenClosedTab:",@"T"]],@[@"Edit",@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"],@[@"Find…",@"findInPage:",@"f"]],@[@"View",@[@"Reading List",@"showReading:",@"L"],@[@"1Password…",@"showPasswords:",@"P"],@[@"Toggle Sidebar",@"toggleSidebar:",@"s"],@[@"Address Bar",@"focusAddress:",@"l"],@[@"Reload",@"reloadPage:",@"r"],@[@"Back",@"goBack:",@"["],@[@"Forward",@"goForward:",@"]"],@[@"Zoom In",@"zoomIn:",@"+"],@[@"Zoom Out",@"zoomOut:",@"-"],@[@"Actual Size",@"zoomReset:",@"0"],@[@"Developer Tools",@"showDevTools:",@"i"],@[@"Dock Developer Tools",@"toggleDevToolsDock:",@"D"]]];
   for (NSArray *group in groups) {
     NSMenuItem *top = [[NSMenuItem alloc] initWithTitle:group[0] action:nil keyEquivalent:@""];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:group[0]]; top.submenu = menu; [bar addItem:top];
@@ -483,8 +500,10 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   _toggle.frame = NSMakeRect(x,11,28,28); x += 31*(1-reveal);
   _back.frame = NSMakeRect(x,11,27,28); _forward.frame = NSMakeRect(x+28,11,27,28); _reload.frame = NSMakeRect(x+56,11,27,28); x += 92;
   CGFloat tw = _toolbar.bounds.size.width;
-  CGFloat downloads = _downloadsButton.hidden ? 0 : 34;
-  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-(_sessionPicker.hidden ? 44 : 167)-downloads),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
+  CGFloat downloads = _downloadsButton.hidden ? 0 : 34, reserved = (_sessionPicker.hidden ? 44 : 167)+downloads;
+  CGFloat capsule = _capsule.hidden ? 0 : MIN(_capsuleWidth,MAX(60,(tw-x-reserved-90)*.6));
+  _capsule.frame = NSMakeRect(tw-reserved-capsule,11,capsule,28);
+  _addressBar.frame = NSMakeRect(x,10,MAX(90,tw-x-reserved-(capsule>0 ? capsule+8 : 0)),30); _sessionPicker.frame = NSMakeRect(tw-123,12,116,28);
   _passwordButton.frame = NSMakeRect(tw-157-downloads,11,28,28);
   _downloadsButton.frame = NSMakeRect(tw-157,11,28,28);
   _progress.frame = NSMakeRect(0,48,tw,3);
@@ -992,6 +1011,9 @@ static NSString *SnoozeLabel(double until, BOOL full) {
 
 #pragma mark Downloads
 static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
+// How long a pass or approval announces itself, and a changed row stays tinted on the pages.
+static const NSTimeInterval RailTransientSeconds = 6, RailChangeTintSeconds = 10;
+static NSString *ShortAge(double time);
 - (NSString *)downloadsFile { return [_directory stringByAppendingPathComponent:@"downloads.json"]; }
 - (void)loadDownloads {
   _downloads=[NSMutableArray array];
@@ -1176,6 +1198,7 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   NSError *error=nil; if (!rail::SaveState(_directory,_model,&error)) [self setStatus:[NSString stringWithFormat:@"Could not save the layout: %@",error.localizedDescription]];
   if (_historyDirty) { _history.prune(5000,Now()); _historyDirty=!rail::SaveHistory(_directory,_history,nil); }
   if (_downloadsDirty) _downloadsDirty=![self saveDownloads];
+  if (_runsDirty) _runsDirty=!rail::SaveTrackedRuns(_directory,_runs,nil);
   if (_projectsDirty && _projectsSavingAllowed) { NSError *projectError=nil; _projectsDirty=!rail::SaveProjects(_directory,_projects,&projectError); if (_projectsDirty) [self setStatus:[NSString stringWithFormat:@"Could not save projects: %@",projectError.localizedDescription]]; }
 }
 // Dragging a tab into the Pinned section pins it; dragging a pinned tab out unpins it.
@@ -1800,6 +1823,8 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   _railDropIndicator.layer.borderColor=RailTint(RailRoleFocus).CGColor; _dropIndicator.layer.borderColor=RailTint(RailRoleFocus).CGColor;
   _findBar.layer.borderColor=RailLine().CGColor;
   if (_downloadsPopover) { _downloadsPopover.appearance=RailThemeAppearance(); if (_downloadsPopover.shown) [self fillDownloadsPopover]; }
+  if (_checksPopover) _checksPopover.appearance=RailThemeAppearance();
+  [self updateCapsule];
   [self updateDownloads]; [self refresh]; RailRedrawAllWindows();
 }
 
@@ -1827,8 +1852,8 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   std::vector<std::string> ids; for (const auto &[id,slot]:_runtime) { (void)slot; ids.push_back(id); }
   for (const auto &id:ids) [self closeRuntime:id reason:CloseReason::Quit session:""];
 }
-- (void)finishQuit { [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [self saveNow]; _contexts.clear(); [_window orderOut:nil]; CefQuitMessageLoop(); }
-- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [_statusTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [_saveTimer invalidate]; _window.delegate=nil; }
+- (void)finishQuit { [_statusTimer invalidate]; [_transientTimer invalidate]; [_capsuleTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [self saveNow]; _contexts.clear(); [_window orderOut:nil]; CefQuitMessageLoop(); }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [_statusTimer invalidate]; [_transientTimer invalidate]; [_idleTimer invalidate]; [_automationTimer invalidate]; [_saveTimer invalidate]; _window.delegate=nil; }
 
 #pragma mark Reading
 - (CGFloat)shownSidebarWidth { return _readingVisible ? MAX(292,_model.state.sidebarWidth) : _model.state.sidebarWidth; }
@@ -1945,8 +1970,187 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
 }
 - (void)statusChanged {
   if (_statusRefreshQueued) return; _statusRefreshQueued=YES; __weak BrowserController *weak=self;
-  dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (!strong) return; strong->_statusRefreshQueued=NO; [strong refresh]; });
+  dispatch_async(dispatch_get_main_queue(), ^{
+    BrowserController *strong=weak; if (!strong) return; strong->_statusRefreshQueued=NO;
+    [strong updateTrackedRuns];
+    // Checks run all day in the background, so only one that changed something rebuilds the pages.
+    std::string signature=rail::statusSignature([strong->_status snapshot])+([strong->_status isChecking] ? "checking" : "");
+    if (signature==strong->_statusSignature) return;
+    strong->_statusSignature=signature; [strong refresh];
+  });
 }
+- (void)statusTick {
+  [self checkProjects:NO];
+  [self updateCapsule];
+  if (_checksPopover.shown) [self fillChecksList];
+  if (!_homeVisible) return;
+  BOOL tinting=!_runs.changedSince(Now()-RailChangeTintSeconds).empty();
+  NSString *label=[self updatedLabel:[self lastUpdate]];
+  if (tinting || _tinting || ![label isEqual:_updatedLabel]) [self refreshHome];
+}
+- (void)updateTrackedRuns {
+  if (!_runsFixture) {
+    const auto &status=[_status snapshot];
+    if (_projectsSavingAllowed && !_automation) _runs.keepOnlySources(rail::boundSources(_projects.state));
+    auto announced=_runs.observe(rail::observeRuns(_projects,status),rail::readSources(status),Now());
+    [self announce:announced];
+  }
+  [self updateCapsule];
+  if (_checksPopover.shown) [self fillChecksList];
+  std::string signature;
+  for (const auto &run : _runs.runs) signature+=run.key+run.revision+std::to_string((int)run.state)+(run.acknowledged ? "a" : "")+(run.passedSeen ? "s" : "")+(run.cleared ? "c" : "")+";";
+  if (signature!=_runsSignature) { _runsSignature=signature; _runsDirty=YES; [self saveSoon]; }
+}
+- (void)announce:(const std::vector<rail::TrackedRun> &)announced {
+  for (const auto &run : announced) {
+    if (run.state==rail::RunState::failed) _announcedFailures.push_back(run.key); else _queuedRuns.push_back(run.key);
+    NSString *text=[NSString stringWithFormat:@"%@: %@",S(run.title),run.state==rail::RunState::failed ? @"failed" : run.state==rail::RunState::waiting ? @"waiting for approval" : @"passed"];
+    NSAccessibilityPostNotificationWithUserInfo(NSApp,NSAccessibilityAnnouncementRequestedNotification,@{NSAccessibilityAnnouncementKey:text,NSAccessibilityPriorityKey:@(NSAccessibilityPriorityHigh)});
+  }
+  [self showNextTransient];
+}
+// Passes and approvals announce for a few seconds each, one at a time.
+- (void)showNextTransient {
+  if (_transientTimer.valid || _queuedRuns.empty()) return;
+  _transientRun=_queuedRuns.front(); _queuedRuns.erase(_queuedRuns.begin());
+  __weak BrowserController *weak=self;
+  _transientTimer=[NSTimer scheduledTimerWithTimeInterval:RailTransientSeconds repeats:NO block:^(NSTimer *timer) {
+    (void)timer; BrowserController *strong=weak; if (!strong) return;
+    strong->_transientTimer=nil; strong->_transientRun.clear(); [strong showNextTransient]; [strong updateCapsule];
+  }];
+}
+- (std::string)runSubtitle:(const rail::TrackedRun &)run {
+  std::string detail=run.project+(run.number.empty() ? "" : " "+run.number);
+  if (run.spaceID!=_model.state.activeSpaceID) if (const auto *space=_model.space(run.spaceID)) detail=space->name+" · "+detail;
+  return detail;
+}
+- (NSString *)runHeadline:(const rail::TrackedRun &)run {
+  BOOL pull=run.kind=="pullRequest";
+  if (run.state==rail::RunState::failed) return pull ? @"Checks failed" : [NSString stringWithFormat:@"%@ failed",S(run.title)];
+  if (run.state==rail::RunState::waiting) return [NSString stringWithFormat:@"%@ waiting for approval",S(run.title)];
+  if (run.state==rail::RunState::passed) return pull ? @"Checks passed" : [NSString stringWithFormat:@"%@ passed",S(run.title)];
+  return pull ? @"Checks running" : S(run.title);
+}
+- (void)updateCapsule {
+  if (!_capsule) return;
+  double now=Now(); rail::RunCounts counts=_runs.counts(now); auto listed=_runs.listed(now);
+  std::vector<rail::RunWarning> warnings=_runsFixture ? _warningsFixture : rail::runWarnings(_projects.state,[_status snapshot],now);
+  _capsule.running=counts.running; _capsule.waiting=counts.waiting; _capsule.failed=counts.failed; _capsule.passed=counts.passed; _capsule.warning=!warnings.empty(); _capsule.listOpen=_checksPopover.shown;
+  while (!_announcedFailures.empty()) { const auto *run=_runs.run(_announcedFailures.back()); if (run && run->state==rail::RunState::failed && !run->acknowledged) break; _announcedFailures.pop_back(); }
+  const rail::TrackedRun *shown=!_announcedFailures.empty() ? _runs.run(_announcedFailures.back()) : !_transientRun.empty() ? _runs.run(_transientRun) : nullptr;
+  __weak BrowserController *weak=self;
+  if (shown) {
+    std::string key=shown->key;
+    _capsule.announceTitle=[self runHeadline:*shown]; _capsule.announceDetail=S(shown->kind=="pullRequest" ? [self runSubtitle:*shown]+" · "+shown->title : [self runSubtitle:*shown]);
+    _capsule.announceTone=shown->state==rail::RunState::failed ? ProjectToneCritical : shown->state==rail::RunState::waiting ? ProjectToneWarn : ProjectToneOK;
+    _capsule.onOpenAnnounced=^{ [weak openTrackedRun:key]; };
+    _capsule.onDismissAnnounced=nil; if (shown->state==rail::RunState::failed) _capsule.onDismissAnnounced=^{ [weak acknowledgeRun:key]; };
+  } else { _capsule.announceTitle=nil; _capsule.announceDetail=nil; _capsule.onOpenAnnounced=nil; _capsule.onDismissAnnounced=nil; }
+  BOOL hide=listed.empty() && warnings.empty();
+  if (hide!=_capsule.hidden && hide) _capsuleWidth=0;
+  BOOL appearing=_capsule.hidden && !hide;
+  _capsule.hidden=hide; [_capsule reload];
+  [self animateCapsuleTo:hide ? 0 : _capsule.preferredWidth from:appearing ? 0 : _capsuleWidth];
+}
+// The Capsule widens to announce and settles back, and the address bar gives way as it does.
+- (void)animateCapsuleTo:(CGFloat)target from:(CGFloat)start {
+  [_capsuleTimer invalidate]; _capsuleTimer=nil;
+  if (fabs(target-start)<.5 || NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+    if (fabs(target-_capsuleWidth)>=.5) { _capsuleWidth=target; [self layout]; }
+    return;
+  }
+  NSTimeInterval began=NSDate.timeIntervalSinceReferenceDate; __weak BrowserController *weak=self;
+  _capsuleTimer=[NSTimer timerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *timer) {
+    BrowserController *strong=weak; if (!strong) { [timer invalidate]; return; }
+    CGFloat progress=MIN(1,(NSDate.timeIntervalSinceReferenceDate-began)/.22), eased=1-pow(1-progress,3);
+    strong->_capsuleWidth=start+(target-start)*eased; [strong layout];
+    if (progress>=1) { [timer invalidate]; strong->_capsuleTimer=nil; }
+  }];
+  [NSRunLoop.mainRunLoop addTimer:_capsuleTimer forMode:NSRunLoopCommonModes];
+}
+- (void)fillChecksList {
+  double now=Now(); NSMutableArray<ChecksEntry *> *entries=[NSMutableArray array]; __weak BrowserController *weak=self;
+  BOOL finished=NO;
+  for (const auto &run : _runs.listed(now)) {
+    std::string key=run.key; ChecksEntry *entry=[[ChecksEntry alloc] init];
+    BOOL open=run.state==rail::RunState::failed && !run.acknowledged;
+    entry.section=open ? 0 : run.state==rail::RunState::waiting ? 1 : run.state==rail::RunState::running ? 2 : 3;
+    entry.tone=run.state==rail::RunState::failed ? ProjectToneCritical : run.state==rail::RunState::waiting ? ProjectToneWarn : run.state==rail::RunState::running ? ProjectToneRunning : ProjectToneOK;
+    entry.title=[self runHeadline:run]; entry.detail=S(run.kind=="pullRequest" ? [self runSubtitle:run]+" · "+run.title : [self runSubtitle:run]);
+    entry.age=ShortAge(run.state==rail::RunState::running && run.startedAt>0 ? run.startedAt : run.changedAt);
+    entry.open=^{ [weak openTrackedRun:key]; };
+    if (run.kind=="pullRequest") entry.showInActivity=^{ [weak showTrackedRunInActivity:key]; };
+    if (open) entry.dismiss=^{ [weak acknowledgeRun:key]; };
+    finished=finished || entry.section==3;
+    [entries addObject:entry];
+  }
+  _checksList.entries=entries; _checksList.onClear=nil;
+  if (finished) _checksList.onClear=^{ BrowserController *strong=weak; if (!strong) return; strong->_runs.clearFinished(); [strong updateTrackedRuns]; };
+  auto warnings=_runsFixture ? _warningsFixture : rail::runWarnings(_projects.state,[_status snapshot],now);
+  NSMutableArray *texts=[NSMutableArray array]; for (const auto &warning : warnings) [texts addObject:S(warning.text)];
+  _checksList.warnings=texts;
+  _checksList.onWarning=^(NSInteger index) {
+    BrowserController *strong=weak; if (!strong) return;
+    auto current=rail::runWarnings(strong->_projects.state,[strong->_status snapshot],Now());
+    [strong->_checksPopover close];
+    if (index<(NSInteger)current.size() && current[index].signIn) [strong settingsSignIn:current[index].connectionID]; else [strong showHome:nil];
+  };
+  _checksPopover.contentSize=[_checksList reload];
+}
+- (void)toggleChecks:(id)sender {
+  (void)sender;
+  if (_checksPopover.shown) { [_checksPopover close]; return; }
+  if (_capsule.hidden || !_capsule.window) return;
+  if (!_checksPopover) {
+    _checksList=[[ChecksListView alloc] initWithFrame:NSMakeRect(0,0,392,200)];
+    NSViewController *controller=[[NSViewController alloc] init]; controller.view=_checksList;
+    _checksPopover=[[NSPopover alloc] init]; _checksPopover.behavior=NSPopoverBehaviorTransient; _checksPopover.contentViewController=controller;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(checksPopoverClosed:) name:NSPopoverDidCloseNotification object:_checksPopover];
+  }
+  _checksPopover.appearance=RailThemeAppearance();
+  [self fillChecksList];
+  [_checksPopover showRelativeToRect:_capsule.bounds ofView:_capsule preferredEdge:NSRectEdgeMaxY];
+  // Having looked at the list is what settles the passed count, not closing it.
+  _runs.markPassedSeen(); [self updateTrackedRuns];
+}
+- (void)checksPopoverClosed:(NSNotification *)note { (void)note; [self updateCapsule]; }
+- (void)acknowledgeRun:(const std::string &)key { if (_runs.acknowledge(key)) [self updateTrackedRuns]; }
+- (void)selectSpaceOfRun:(const rail::TrackedRun &)run {
+  if (run.spaceID.empty() || run.spaceID==_model.state.activeSpaceID || !_model.space(run.spaceID)) return;
+  _model.selectSpace(run.spaceID,Now()); [self ensureBrowser:_model.state.activeTabID];
+}
+- (void)openTrackedRun:(const std::string &)key {
+  const auto *found=_runs.run(key); if (!found) return;
+  rail::TrackedRun run=*found;
+  [_checksPopover close]; [self selectSpaceOfRun:run];
+  _runs.acknowledge(key); [self updateTrackedRuns];
+  std::string session=run.sessionID; if (session.empty()) if (const auto *space=_model.space(run.spaceID)) session=space->sessionID;
+  if (!run.url.empty()) [self openProjectURL:run.url session:session exact:YES];
+}
+- (void)showTrackedRunInActivity:(const std::string &)key {
+  const auto *found=_runs.run(key); if (!found) return;
+  rail::TrackedRun run=*found;
+  [_checksPopover close]; [self selectSpaceOfRun:run];
+  _runs.acknowledge(key); [self updateTrackedRuns];
+  _activitySelection=S(run.pageURL); [self showActivity:nil];
+}
+- (double)lastUpdate {
+  double checked=0; const auto &status=[_status snapshot];
+  for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) {
+    for (const auto &binding : project->sources) { auto found=status.sources.find(rail::sourceKey(binding)); if (found!=status.sources.end()) checked=MAX(checked,found->second.readAt); }
+    if (_homePage==0) for (const auto &e : project->environments) { auto found=status.environments.find(e.id); if (found!=status.environments.end()) checked=MAX(checked,found->second.checkedAt); }
+  }
+  return checked;
+}
+- (NSString *)updatedLabel:(double)checked {
+  if (checked<=0) return @"";
+  double age=Now()-checked;
+  if (age<60) return @"Updated just now";
+  if (age<60*60) return [NSString stringWithFormat:@"Updated %d min ago",(int)(age/60)];
+  NSDateFormatter *time=[[NSDateFormatter alloc] init]; time.dateStyle=NSDateFormatterNoStyle; time.timeStyle=NSDateFormatterShortStyle;
+  return [@"Updated " stringByAppendingString:[time stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]];
+}
+- (ProjectTone)toneOfChange:(const rail::TrackedRun &)run { return run.state==rail::RunState::failed ? ProjectToneCritical : run.state==rail::RunState::waiting ? ProjectToneWarn : run.state==rail::RunState::passed ? ProjectToneOK : ProjectToneInfo; }
 - (void)showHome:(id)sender {
   (void)sender; if (_quitting) return;
   _homeVisible=YES; _readingVisible=NO; _homePage=0; _statusMessage=nil; _editingAddress=NO; [_window makeFirstResponder:nil]; [self hideSuggestions];
@@ -1958,8 +2162,11 @@ static const NSUInteger RailKeptDownloads = 20, RailShownDownloads = 8;
   [self refresh]; [_window makeFirstResponder:_activity]; [self checkProjects:NO];
 }
 - (void)checkProjects:(BOOL)force {
-  std::vector<rail::Project> list; for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) list.push_back(*project);
-  [_status checkProjects:list connections:_projects.state.connections force:force]; [self refreshHome];
+  // Environment health only matters on the page showing it; providers are followed in every Space.
+  std::vector<rail::Project> health;
+  if (force || (_homeVisible && _window.isVisible)) for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) health.push_back(*project);
+  [_status checkHealth:health sources:_projects.state.projects connections:_projects.state.connections force:force];
+  if (force) [self refreshHome];
 }
 - (NSUInteger)attentionCountInSpace:(std::string)spaceID {
   NSUInteger count=0; const auto &status=[_status snapshot];
@@ -2211,20 +2418,22 @@ static NSString *ShortAge(double time) {
   const auto *space=_model.space(_model.state.activeSpaceID); NSString *spaceName=space ? S(space->name) : @"this Space";
   NSArray<ActivityItem *> *items=[self activityItems]; const auto &status=[_status snapshot];
   NSUInteger needsYou=0; for (ActivityItem *item in items) if (item.stage==0) needsYou++;
-  BOOL anySource=NO, known=NO, signedOut=NO; double checked=0;
+  BOOL anySource=NO, known=NO, signedOut=NO;
   for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) for (const auto &binding : project->sources) {
     anySource=YES; auto found=status.sources.find(rail::sourceKey(binding));
-    if (found!=status.sources.end()) { known=known || found->second.myPullRequestsKnown; checked=MAX(checked,found->second.checkedAt); }
+    if (found!=status.sources.end()) known=known || found->second.myPullRequestsKnown;
     auto connection=status.connections.find(binding.connectionID);
     if (connection!=status.connections.end() && (connection->second.access==rail::Access::signedOut || connection->second.access==rail::Access::rejected)) signedOut=YES;
   }
   NSMutableArray *summary=[NSMutableArray array];
   if (items.count) [summary addObject:needsYou ? [NSString stringWithFormat:@"%lu need%@ you",(unsigned long)needsYou,needsYou==1 ? @"s" : @""] : [NSString stringWithFormat:@"%lu open",(unsigned long)items.count]];
-  if (checked>0) { NSDateFormatter *time=[[NSDateFormatter alloc] init]; time.dateStyle=NSDateFormatterNoStyle; time.timeStyle=NSDateFormatterShortStyle; [summary addObject:[@"Checked " stringByAppendingString:[time stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]]]; }
+  _updatedLabel=[self updatedLabel:[self lastUpdate]]; if (_updatedLabel.length) [summary addObject:_updatedLabel];
   if (!anySource) { _activity.emptyTitle=[NSString stringWithFormat:@"No repositories in %@ yet",spaceName]; _activity.emptyDetail=@"Activity shows your own open pull requests, with their checks and reviews, from the repositories of this Space's projects. Add a project with an Azure DevOps or GitHub repository."; }
   else if (signedOut && !known) { _activity.emptyTitle=@"Sign in to see your pull requests"; _activity.emptyDetail=@"A repository connection in this Space needs you to sign in. Open Projects to sign in, then check again."; }
   else if (!known) { _activity.emptyTitle=@"Checking your pull requests…"; _activity.emptyDetail=@"Your open pull requests appear here once the repositories have answered."; }
   else { _activity.emptyTitle=@"No open pull requests of yours"; _activity.emptyDetail=[NSString stringWithFormat:@"Pull requests you open in %@'s repositories show up here with their checks, policies and reviewers.",spaceName]; }
+  auto changes=_runs.changedSince(Now()-RailChangeTintSeconds); _tinting=!changes.empty();
+  for (ActivityItem *item in items) for (const auto &run : changes) if ([S(run.pageURL) isEqualToString:item.key]) item.changedTone=[self toneOfChange:run];
   _activity.summary=[summary componentsJoinedByString:@" · "]; _activity.items=items; _activity.selectedKey=_activitySelection; _activity.checking=[_status isChecking];
   [_activity reload];
 }
@@ -2233,15 +2442,16 @@ static NSString *ShortAge(double time) {
   if (_homePage==1) { [self refreshActivity]; return; }
   const auto *space=_model.space(_model.state.activeSpaceID);
   NSArray<ProjectCard *> *cards=[self projectCards];
-  NSUInteger attention=0, local=0; double checked=0; const auto &status=[_status snapshot];
+  NSUInteger attention=0, local=0;
   for (ProjectCard *card in cards) { if (card.needsAttention) attention++; if (card.runsLocally) local++; }
-  for (const auto *project : _projects.inSpace(_model.state.activeSpaceID)) for (const auto &e : project->environments) { auto f=status.environments.find(e.id); if (f!=status.environments.end()) checked=MAX(checked,f->second.checkedAt); }
+  auto changes=_runs.changedSince(Now()-RailChangeTintSeconds); _tinting=!changes.empty();
+  for (ProjectCard *card in cards) for (const auto &run : changes) if ([S(run.project) isEqualToString:card.name]) card.changedTone=[self toneOfChange:run];
   NSMutableArray *summary=[NSMutableArray array];
   if (!cards.count) [summary addObject:@"Repositories, environments and their health, in one place."];
   else {
     [summary addObject:attention ? [NSString stringWithFormat:@"%lu need%@ attention",(unsigned long)attention,attention==1 ? @"s" : @""] : @"Nothing needs attention"];
     if (local) [summary addObject:[NSString stringWithFormat:@"%lu running locally",(unsigned long)local]];
-    if (checked>0) { NSDateFormatter *time=[[NSDateFormatter alloc] init]; time.dateStyle=NSDateFormatterNoStyle; time.timeStyle=NSDateFormatterShortStyle; [summary addObject:[@"Checked " stringByAppendingString:[time stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]]]; }
+    _updatedLabel=[self updatedLabel:[self lastUpdate]]; if (_updatedLabel.length) [summary addObject:_updatedLabel];
   }
   _home.spaceName=space ? S(space->name) : @"this Space"; _home.summary=[summary componentsJoinedByString:@" · "]; _home.cards=cards; _home.filter=_homeFilter; _home.checking=[_status isChecking] || _loadingRepositories;
   NSMenu *add=[[NSMenu alloc] init]; __weak BrowserController *weak=self;
@@ -2714,6 +2924,10 @@ static NSString *ShortAge(double time) {
         NSView *view=_settingsWindow.window.contentView; NSBitmapImageRep *settings=[view bitmapImageRepForCachingDisplayInRect:view.bounds]; [view cacheDisplayInRect:view.bounds toBitmapImageRep:settings];
         [[settings representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[_directory stringByAppendingPathComponent:@"settings-window.png"] atomically:YES];
       }
+      if (_checksPopover.shown) {
+        NSBitmapImageRep *list=[_checksList bitmapImageRepForCachingDisplayInRect:_checksList.bounds]; [_checksList cacheDisplayInRect:_checksList.bounds toBitmapImageRep:list];
+        [[list representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[_directory stringByAppendingPathComponent:@"checks-list.png"] atomically:YES];
+      }
       if (_passwordFixtureOrigin.length && _passwordPalette.panel.isVisible) {
         [_passwordPalette.panel displayIfNeeded];
         NSView *view=_passwordPalette.panel.contentView; NSBitmapImageRep *rep=[view bitmapImageRepForCachingDisplayInRect:view.bounds]; [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
@@ -2730,6 +2944,24 @@ static NSString *ShortAge(double time) {
       [self projectsChanged];
     }
     else if ([action isEqual:@"checkProjects"]) [self checkProjects:YES];
+    else if ([action isEqual:@"trackedRuns"]) {
+      // Stands in for a provider check: each run as it would come back from one source.
+      _runsFixture=YES; std::vector<rail::RunObservation> observations;
+      for (NSDictionary *item in [command[@"runs"] isKindOfClass:NSArray.class] ? command[@"runs"] : @[]) {
+        rail::RunObservation observation; auto &run=observation.run;
+        run.key=C(item[@"key"] ?: @""); run.sourceKey="fixture"; run.kind=C(item[@"kind"] ?: @"pullRequest"); run.revision=C(item[@"revision"] ?: @"1"); run.title=C(item[@"title"] ?: @""); run.project=C(item[@"project"] ?: @"");
+        run.spaceID=item[@"space"] ? C(item[@"space"]) : _model.state.activeSpaceID; run.number=C(item[@"number"] ?: @""); run.url=C(item[@"url"] ?: @""); run.pageURL=C(item[@"page"] ?: @"");
+        NSString *state=item[@"state"]; run.state=[state isEqual:@"failed"] ? rail::RunState::failed : [state isEqual:@"passed"] ? rail::RunState::passed : [state isEqual:@"waiting"] ? rail::RunState::waiting : rail::RunState::running;
+        run.startedAt=[item[@"startedAgo"] doubleValue]>0 ? Now()-[item[@"startedAgo"] doubleValue] : 0;
+        observations.push_back(observation);
+      }
+      auto announced=_runs.observe(observations,{"fixture"},Now()); [self announce:announced];
+      _warningsFixture.clear(); for (NSString *text in [command[@"warnings"] isKindOfClass:NSArray.class] ? command[@"warnings"] : @[]) _warningsFixture.push_back({"",C(text),false});
+      [self updateTrackedRuns];
+    }
+    else if ([action isEqual:@"toggleChecks"]) [self toggleChecks:nil];
+    else if ([action isEqual:@"acknowledgeRun"]) [self acknowledgeRun:C(command[@"key"] ?: @"")];
+    else if ([action isEqual:@"showRunInActivity"]) [self showTrackedRunInActivity:C(command[@"key"] ?: @"")];
     else if ([action isEqual:@"importAzure"]) [self importFromAzure:nil];
     else if ([action isEqual:@"sheet"]) {
       // Drives the attached sheet like a user: fill text fields in order, tick checkboxes, click a button.
@@ -2766,7 +2998,10 @@ static NSString *ShortAge(double time) {
   NSTextView *findEditor=(NSTextView *)_findField.currentEditor;
   NSResponder *responder=_window.firstResponder;
   NSDictionary *find=@{@"visible":@(!_findBar.hidden),@"focused":@(findEditor!=nil),@"pageFocused":@([responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:_webHost]),@"selection":findEditor ? NSStringFromRange(findEditor.selectedRange) : @"",@"text":findSlot!=_runtime.end() ? S(findSlot->second.findText) : @"",@"count":@(findSlot!=_runtime.end() ? findSlot->second.findCount : 0),@"ordinal":@(findSlot!=_runtime.end() ? findSlot->second.findOrdinal : 0),@"pending":@(findSlot!=_runtime.end() && findSlot->second.findPending),@"label":_findCount.stringValue ?: @""};
-  NSDictionary *snapshot=@{@"keyWindow":windowState,@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"find":find,@"passwords":_passwordFixtureOrigin.length ? ([_passwordPalette automationState] ?: @{}) : @{},@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"homePage":_homePage == 1 ? @"activity" : @"projects",@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"settings":_settingsWindow.window.isVisible ? _settingsWindow.pane : @"",@"sidebarAnimation":S(_model.state.sidebarAnimation),@"theme":S(_model.state.theme),@"appliedTheme":RailCurrentTheme(),@"appearance":_window.effectiveAppearance.name ?: @"",@"settingsAppearance":_settingsWindow.window.effectiveAppearance.name ?: @"",@"windowNumber":@(_window.windowNumber),@"rootSize":@[@(_root.bounds.size.width),@(_root.bounds.size.height)],@"settingsWindowNumber":@(_settingsWindow.window.isVisible ? _settingsWindow.window.windowNumber : 0),@"devTools":[self activeDevToolsMode],@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
+  rail::RunCounts runCounts=_runs.counts(Now()); NSMutableArray *listedRuns=[NSMutableArray array];
+  for (const auto &run : _runs.listed(Now())) [listedRuns addObject:@{@"key":S(run.key),@"state":@((int)run.state),@"acknowledged":@(run.acknowledged)}];
+  NSDictionary *checks=@{@"visible":@(!_capsule.hidden),@"running":@(runCounts.running),@"waiting":@(runCounts.waiting),@"failed":@(runCounts.failed),@"passed":@(runCounts.passed),@"announcing":_capsule.announceTitle ?: @"",@"listOpen":@(_checksPopover.shown),@"runs":listedRuns};
+  NSDictionary *snapshot=@{@"checks":checks,@"keyWindow":windowState,@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"find":find,@"passwords":_passwordFixtureOrigin.length ? ([_passwordPalette automationState] ?: @{}) : @{},@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"homePage":_homePage == 1 ? @"activity" : @"projects",@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"settings":_settingsWindow.window.isVisible ? _settingsWindow.pane : @"",@"sidebarAnimation":S(_model.state.sidebarAnimation),@"theme":S(_model.state.theme),@"appliedTheme":RailCurrentTheme(),@"appearance":_window.effectiveAppearance.name ?: @"",@"settingsAppearance":_settingsWindow.window.effectiveAppearance.name ?: @"",@"windowNumber":@(_window.windowNumber),@"rootSize":@[@(_root.bounds.size.width),@(_root.bounds.size.height)],@"settingsWindowNumber":@(_settingsWindow.window.isVisible ? _settingsWindow.window.windowNumber : 0),@"devTools":[self activeDevToolsMode],@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
   [[NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
 }
 @end

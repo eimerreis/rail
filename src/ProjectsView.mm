@@ -87,7 +87,7 @@ NSImage *ProjectStateSymbol(ProjectTone tone, CGFloat size) {
     default: name = @"circle.dotted"; color = RailTint(RailRoleFaint); break;
   }
   NSImage *image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
-  NSImageSymbolConfiguration *config = [[NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightMedium] configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[color]]];
+  NSImageSymbolConfiguration *config = [[NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightMedium] configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:[name hasSuffix:@".fill"] ? @[NSColor.whiteColor,color] : @[color]]];
   return [image imageWithSymbolConfiguration:config];
 }
 
@@ -268,7 +268,7 @@ static CGFloat nameXOffset(ProjectCard *card) { return card.provider ? 27 : 0; }
 - (NSView *)laneView:(ProjectCard *)card width:(CGFloat)width {
   // The layer paints the rounded lane so a soft shadow can sit outside it.
   RailPanel *view = [[RailPanel alloc] initWithFrame:NSMakeRect(0,0,width,60)]; view.menu = card.menu;
-  view.wantsLayer = YES; view.layer.backgroundColor = RailTint(RailRoleRaised).CGColor; view.layer.cornerRadius = 10; view.layer.borderWidth = 1;
+  view.wantsLayer = YES; view.layer.backgroundColor = (card.changedTone != ProjectToneNeutral ? ProjectToneFill(card.changedTone) : RailTint(RailRoleRaised)).CGColor; view.layer.cornerRadius = 10; view.layer.borderWidth = 1;
   view.layer.borderColor = (card.needsAttention ? [RailTint(RailRoleCriticalDot) colorWithAlphaComponent:.45] : Line()).CGColor;
   if (card.needsAttention) { view.layer.shadowColor = RailTint(RailRoleCriticalDot).CGColor; view.layer.shadowOpacity = .12; view.layer.shadowRadius = 9; view.layer.shadowOffset = CGSizeMake(0,-4); }
 

@@ -94,6 +94,15 @@ int main() {
       Check(!rail::LoadProjects(directory,loaded,&error), "future projects schema accepted");
       [NSFileManager.defaultManager removeItemAtPath:projectsPath error:nil];
       Check(rail::LoadProjects(directory,loaded,&error) && loaded.state.projects.empty(), "missing projects file should be empty");
+      rail::TrackedRuns tracked; rail::TrackedRuns untouched; untouched.runs.push_back({});
+      Check(!rail::LoadTrackedRuns(directory,untouched) && untouched.runs.size() == 1, "missing tracked runs should change nothing");
+      rail::TrackedRun run; run.key = "run:release"; run.sourceKey = "c|a/b"; run.kind = "pipeline"; run.revision = "41"; run.title = "release"; run.project = "App"; run.spaceID = "work"; run.sessionID = "work"; run.number = "12"; run.url = "https://example.com/run"; run.pageURL = "https://example.com/pr"; run.state = rail::RunState::failed; run.startedAt = 5; run.changedAt = 6; run.acknowledged = true; run.passedSeen = true; run.cleared = true;
+      tracked.runs.push_back(run);
+      Check(rail::SaveTrackedRuns(directory,tracked,&error), "tracked runs should save");
+      rail::TrackedRuns reloaded;
+      Check(rail::LoadTrackedRuns(directory,reloaded) && reloaded.runs.size() == 1, "tracked runs should load");
+      const auto &back = reloaded.runs[0];
+      Check(back.key == run.key && back.revision == "41" && back.state == rail::RunState::failed && back.acknowledged && back.passedSeen && back.cleared && back.changedAt == 6 && back.pageURL == run.pageURL, "tracked runs should survive a restart");
       std::cout << "PASS projects round-trip, corruption, future schema, missing file\n";
     } @finally {
       [NSFileManager.defaultManager removeItemAtPath:directory error:nil];

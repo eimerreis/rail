@@ -18,8 +18,10 @@
 @property(nonatomic, readonly) NSString *gitHubClientID;
 - (instancetype)initWithContexts:(CefRefPtr<CefRequestContext> (^)(NSString *sessionID))contexts;
 - (const rail::StatusSnapshot &)snapshot;
-// Checks what is due; force checks everything now.
-- (void)checkProjects:(const std::vector<rail::Project> &)projects connections:(const std::vector<rail::Connection> &)connections force:(BOOL)force;
+// Checks what is due: the health of health's environments, and the providers behind sources. A source
+// is due sooner while something of the user's is running. Force checks everything now.
+- (void)checkHealth:(const std::vector<rail::Project> &)health sources:(const std::vector<rail::Project> &)sources connections:(const std::vector<rail::Connection> &)connections force:(BOOL)force;
+// A check the user asked for is still under way. Routine checks show no progress.
 - (BOOL)isChecking;
 - (BOOL)hasGitHubToken:(NSString *)connectionID;
 - (void)signInToGitHub:(NSString *)connectionID

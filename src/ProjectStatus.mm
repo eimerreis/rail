@@ -32,6 +32,9 @@ NSString *Query(NSString *base, NSDictionary<NSString *, NSString *> *items) {
   return parts.URL.absoluteString;
 }
 
+// Azure DevOps limits a user across the whole organization, so one sign to slow down covers every connection.
+double AzureRetryAt = 0;
+
 // GET in a session's request context, carrying that session's login. Redirects are not followed,
 // so a sign-in redirect stays visible. Only Azure DevOps API paths are allowed.
 class SessionRequestClient final : public CefURLRequestClient {
@@ -44,6 +47,10 @@ class SessionRequestClient final : public CefURLRequestClient {
     int status = response ? response->GetStatus() : 0;
     NSString *location = response ? S(response->GetHeaderByName("Location").ToString()) : @"";
     NSString *mime = response ? S(response->GetMimeType().ToString()) : @"";
+    if (response) {
+      double retry = S(response->GetHeaderByName("Retry-After").ToString()).doubleValue;
+      if (retry > 0 || status == 429) AzureRetryAt = MAX(AzureRetryAt, Now() + MAX(retry, 60));
+    }
     Done done = done_; done_ = nil; request_ = nullptr;
     done(status, location, mime, [NSData dataWithBytes:body_.data() length:body_.size()]);
   }
@@ -105,7 +112,11 @@ NSString *ShortError(NSError *error) {
   NSURLSession *_session;
   NSMutableSet<NSNumber *> *_healthTasks;
   std::set<std::string> _inFlight;
-  std::map<std::string, double> _connectionChecked, _sourceChecked;
+  std::map<std::string, double> _sourceChecked;
+  BOOL _forcedCheck;
+  double _gitHubRetryAt;
+  NSMutableDictionary<NSString *, NSString *> *_gitHubTags;
+  NSMutableDictionary<NSString *, id> *_gitHubBodies;
   BOOL _deviceFlowCancelled;
   NSUInteger _deviceFlow;
 }
@@ -117,19 +128,19 @@ NSString *ShortError(NSError *error) {
     config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData; config.timeoutIntervalForRequest = 10;
     config.HTTPAdditionalHeaders = @{@"User-Agent":@"Rail"};
     _session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
-    _healthTasks = [NSMutableSet set];
+    _healthTasks = [NSMutableSet set]; _gitHubTags = [NSMutableDictionary dictionary]; _gitHubBodies = [NSMutableDictionary dictionary];
   }
   return self;
 }
 - (const rail::StatusSnapshot &)snapshot { return _snapshot; }
-- (BOOL)isChecking { return !_inFlight.empty(); }
+- (BOOL)isChecking { return _forcedCheck; }
 - (NSString *)gitHubClientID {
   NSString *configured = [NSUserDefaults.standardUserDefaults stringForKey:@"GitHubClientID"];
   if (configured.length) return configured;
   NSString *bundled = [NSBundle.mainBundle objectForInfoDictionaryKey:@"RailGitHubClientID"];
   return [bundled isKindOfClass:NSString.class] && bundled.length && ![bundled hasPrefix:@"$"] ? bundled : nil;
 }
-- (void)changed { if (self.onChange) self.onChange(); }
+- (void)changed { if (_inFlight.empty()) _forcedCheck = NO; if (self.onChange) self.onChange(); }
 
 // Health checks follow no redirects: a redirect to another host means a login sits in front.
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler {
@@ -137,26 +148,43 @@ NSString *ShortError(NSError *error) {
   completionHandler([_healthTasks containsObject:@(task.taskIdentifier)] ? nil : request);
 }
 
-- (void)checkProjects:(const std::vector<rail::Project> &)projects connections:(const std::vector<rail::Connection> &)connections force:(BOOL)force {
+- (void)checkHealth:(const std::vector<rail::Project> &)health sources:(const std::vector<rail::Project> &)sources connections:(const std::vector<rail::Connection> &)connections force:(BOOL)force {
   double now = Now();
-  for (const auto &project : projects) for (const auto &environment : project.environments) {
+  if (force) _forcedCheck = YES;
+  for (const auto &project : health) for (const auto &environment : project.environments) {
     auto known = _snapshot.environments.find(environment.id);
     double last = known == _snapshot.environments.end() ? 0 : known->second.checkedAt;
     if (_inFlight.count(environment.id) || (!force && now - last < 55)) continue;
     [self checkEnvironment:environment];
   }
   std::map<std::string, std::vector<rail::SourceBinding>> byConnection;
-  for (const auto &project : projects) for (const auto &binding : project.sources) byConnection[binding.connectionID].push_back(binding);
+  for (const auto &project : sources) for (const auto &binding : project.sources) byConnection[binding.connectionID].push_back(binding);
   for (const auto &connection : connections) {
     auto bindings = byConnection.find(connection.id);
     if (bindings == byConnection.end()) continue;
     std::string key = "connection:" + connection.id;
-    if (_inFlight.count(key) || (!force && now - _connectionChecked[connection.id] < 115)) continue;
-    _connectionChecked[connection.id] = now;
-    if (connection.provider == "azureDevOps") [self checkAzure:connection bindings:bindings->second];
-    else if (connection.provider == "github") [self checkGitHub:connection bindings:bindings->second];
+    if (_inFlight.count(key)) continue;
+    BOOL throttled = now < (connection.provider == "azureDevOps" ? AzureRetryAt : _gitHubRetryAt);
+    if (_snapshot.connections[connection.id].throttled != (bool)throttled) _snapshot.connections[connection.id].throttled = throttled;
+    if (throttled) continue;
+    std::vector<rail::SourceBinding> due;
+    for (const auto &binding : bindings->second) {
+      std::string source = rail::sourceKey(binding);
+      auto known = _snapshot.sources.find(source);
+      int interval = known == _snapshot.sources.end() ? rail::IdlePollSeconds : rail::sourcePollSeconds(known->second);
+      if (force || now - _sourceChecked[source] >= interval) { due.push_back(binding); _sourceChecked[source] = now; }
+    }
+    if (due.empty()) continue;
+    if (connection.provider == "azureDevOps") [self checkAzure:connection bindings:due];
+    else if (connection.provider == "github") [self checkGitHub:connection bindings:due];
   }
   [self changed];
+}
+// Keeps when the source last answered cleanly, which a replaced status would otherwise lose.
+- (void)storeSource:(rail::SourceStatus)result key:(const std::string &)key {
+  auto previous = _snapshot.sources.find(key);
+  result.checkedAt = Now(); result.readAt = result.error.empty() ? result.checkedAt : previous == _snapshot.sources.end() ? 0 : previous->second.readAt;
+  _snapshot.sources[key] = result;
 }
 
 #pragma mark Health
@@ -257,6 +285,7 @@ NSString *ShortError(NSError *error) {
   NSArray *parts = [S(binding.resource) componentsSeparatedByString:@"/"];
   if (parts.count != 3) return;
   std::string key = rail::sourceKey(binding);
+  if (_inFlight.count(key)) return;
   _inFlight.insert(key);
   NSString *base = [NSString stringWithFormat:@"https://dev.azure.com/%@/%@/_apis/git/repositories/%@", parts[0], parts[1], parts[2]];
   __weak ProjectStatusService *weak = self;
@@ -271,13 +300,13 @@ NSString *ShortError(NSError *error) {
     if (status != 200 || !Str(repo[@"id"]).length) { fail(status == 404 ? @"Repository not found" : [NSString stringWithFormat:@"Couldn't read the repository (HTTP %d)", status]); return; }
     NSString *repoID = Str(repo[@"id"]), *branch = Str(repo[@"defaultBranch"]), *projectID = Str(Dict(repo[@"project"])[@"id"]);
     NSString *project = [NSString stringWithFormat:@"https://dev.azure.com/%@/%@/_apis", parts[0], parts[1]];
-    __block int pending = 2; __block rail::SourceStatus result;
+    __block int pending = 3; __block rail::SourceStatus result;
     result.defaultBranch = C([branch stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
     result.pullRequestsURL = C([NSString stringWithFormat:@"https://dev.azure.com/%@/%@/_git/%@/pullrequests", parts[0], parts[1], parts[2]]);
     void (^complete)(void) = ^{
       if (--pending) return;
       ProjectStatusService *strong = weak; if (!strong) return;
-      strong->_inFlight.erase(key); result.checkedAt = Now(); strong->_snapshot.sources[key] = result; [strong changed];
+      strong->_inFlight.erase(key); [strong storeSource:result key:key]; [strong changed];
     };
     NSMutableDictionary *query = [@{@"repositoryId":repoID,@"repositoryType":@"TfsGit",@"$top":@"25",@"queryOrder":@"queueTimeDescending",@"api-version":@"7.1"} mutableCopy];
     if (branch.length) query[@"branchName"] = branch;
@@ -293,6 +322,38 @@ NSString *ShortError(NSError *error) {
                                C(Str(Dict(Dict(Dict(build[@"_links"])[@"web"]))[@"href"])), ISODate(Str(build[@"finishTime"]))});
       }
       if (buildStatus != 200) result.error = "Couldn't read pipelines";
+      complete();
+    });
+    // Runs the user started by hand, on any branch. CI and pull request builds are not theirs to follow here.
+    NSDictionary *mine = @{@"repositoryId":repoID,@"repositoryType":@"TfsGit",@"reasonFilter":@"manual",@"$top":@"30",@"queryOrder":@"queueTimeDescending",@"api-version":@"7.1"};
+    SessionGET(context, Query([project stringByAppendingString:@"/build/builds"], mine), ^(int buildStatus, NSString *l, NSString *m, NSData *builds) {
+      (void)l; (void)m;
+      std::set<std::string> seen;
+      for (id item in List(Dict(JSON(builds))[@"value"])) {
+        NSDictionary *build = Dict(item); if (!build) continue;
+        if (!userID.length || [Str(Dict(build[@"requestedFor"])[@"id"]) caseInsensitiveCompare:userID] != NSOrderedSame) continue;
+        NSDictionary *definition = Dict(build[@"definition"]);
+        if (!seen.insert(C(Str(definition[@"id"]))).second) continue;
+        rail::PipelineRun run;
+        run.name = C(Str(definition[@"name"])); run.number = C(Str(build[@"buildNumber"])); run.id = C(Str(build[@"id"])); run.definitionID = C(Str(definition[@"id"]));
+        run.branch = C([Str(build[@"sourceBranch"]) stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
+        run.result = rail::azureBuildResult(C(Str(build[@"status"])), C(Str(build[@"result"])));
+        run.url = C(Str(Dict(Dict(Dict(build[@"_links"])[@"web"]))[@"href"])); run.finishedAt = ISODate(Str(build[@"finishTime"]));
+        run.startedAt = ISODate(Str(build[@"startTime"])) ?: ISODate(Str(build[@"queueTime"]));
+        result.myRuns.push_back(run);
+      }
+      if (buildStatus != 200) result.error = "Couldn't read pipelines";
+      // A run held for approval still reads as in progress; only its timeline tells.
+      for (size_t i = 0; i < result.myRuns.size(); i++) {
+        if (result.myRuns[i].result != "running") continue;
+        pending++;
+        SessionGET(context, [project stringByAppendingFormat:@"/build/builds/%@/timeline?api-version=7.1", S(result.myRuns[i].id)], ^(int status, NSString *l2, NSString *m2, NSData *body) {
+          (void)l2; (void)m2;
+          if (status == 200) for (id record in List(Dict(JSON(body))[@"records"]))
+            if ([Str(Dict(record)[@"type"]) isEqualToString:@"Checkpoint.Approval"] && [Str(Dict(record)[@"state"]) isEqualToString:@"inProgress"]) result.myRuns[i].result = "waiting";
+          complete();
+        });
+      }
       complete();
     });
     SessionGET(context, Query([base stringByAppendingString:@"/pullrequests"], @{@"searchCriteria.status":@"active",@"$top":@"100",@"api-version":@"7.1"}), ^(int prStatus, NSString *l, NSString *m, NSData *prs) {
@@ -311,6 +372,7 @@ NSString *ShortError(NSError *error) {
         mine.targetBranch = C([Str(pr[@"targetRefName"]) stringByReplacingOccurrencesOfString:@"refs/heads/" withString:@""]);
         mine.draft = [pr[@"isDraft"] boolValue]; mine.conflicts = [Str(pr[@"mergeStatus"]) isEqualToString:@"conflicts"];
         mine.autoComplete = Dict(pr[@"autoCompleteSetBy"]) != nil; mine.createdAt = ISODate(Str(pr[@"creationDate"]));
+        mine.detailsSHA = C(Str(Dict(pr[@"lastMergeSourceCommit"])[@"commitId"]));
         for (id r in List(pr[@"reviewers"])) {
           NSDictionary *reviewer = Dict(r);
           if (!reviewer || [Str(reviewer[@"id"]) caseInsensitiveCompare:userID] == NSOrderedSame) continue;
@@ -334,6 +396,7 @@ NSString *ShortError(NSError *error) {
             rail::PullRequestCheck check; check.kind = build ? "build" : "policy"; check.name = C(name);
             check.state = rail::azurePolicyState(C(Str(evaluation[@"status"])));
             check.blocking = !configuration[@"isBlocking"] || [configuration[@"isBlocking"] boolValue];
+            check.startedAt = ISODate(Str(evaluation[@"startedDate"]));
             if ([context[@"isExpired"] boolValue]) { check.state = "pending"; check.detail = "Expired"; }
             if (Str(context[@"buildId"]).length) check.url = C([NSString stringWithFormat:@"%@/_build/results?buildId=%@", web, Str(context[@"buildId"])]);
             if (!build) check.detail = check.state == "succeeded" ? "" : C(type);
@@ -425,9 +488,32 @@ NSString *ShortError(NSError *error) {
   [request setValue:[@"Bearer " stringByAppendingString:token] forHTTPHeaderField:@"Authorization"];
   [request setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
   [request setValue:@"2022-11-28" forHTTPHeaderField:@"X-GitHub-Api-Version"];
+  // An unchanged answer costs nothing against the rate limit, which is what makes frequent checks affordable.
+  if (_gitHubTags[path]) [request setValue:_gitHubTags[path] forHTTPHeaderField:@"If-None-Match"];
+  __weak ProjectStatusService *weak = self;
   [[_session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-    (void)error; done(JSON(data), [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0);
+    (void)error;
+    NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
+    ProjectStatusService *strong = weak;
+    if (strong && http) {
+      if (http.statusCode == 304 && strong->_gitHubBodies[path]) { done(strong->_gitHubBodies[path], 200); return; }
+      [strong noteGitHubLimits:http];
+      id body = JSON(data);
+      NSString *tag = [http valueForHTTPHeaderField:@"ETag"];
+      if (http.statusCode == 200 && tag.length && body) {
+        if (strong->_gitHubTags.count > 500) { [strong->_gitHubTags removeAllObjects]; [strong->_gitHubBodies removeAllObjects]; }
+        strong->_gitHubTags[path] = tag; strong->_gitHubBodies[path] = body;
+      }
+      done(body, http.statusCode); return;
+    }
+    done(JSON(data), http.statusCode);
   }] resume];
+}
+- (void)noteGitHubLimits:(NSHTTPURLResponse *)http {
+  double now = Now(), retry = [http valueForHTTPHeaderField:@"Retry-After"].doubleValue, reset = [http valueForHTTPHeaderField:@"X-RateLimit-Reset"].doubleValue;
+  NSString *remaining = [http valueForHTTPHeaderField:@"X-RateLimit-Remaining"];
+  if (retry > 0) _gitHubRetryAt = MAX(_gitHubRetryAt, now + retry);
+  else if (http.statusCode == 429 || (remaining.length && remaining.intValue < 100)) _gitHubRetryAt = MAX(_gitHubRetryAt, reset > now ? MIN(reset, now + 15 * 60) : now + 60);
 }
 - (void)checkGitHub:(rail::Connection)connection bindings:(std::vector<rail::SourceBinding>)bindings {
   std::string key = "connection:" + connection.id;
@@ -445,7 +531,7 @@ NSString *ShortError(NSError *error) {
 - (void)fetchGitHubSource:(rail::SourceBinding)binding token:(NSString *)token connection:(std::string)connectionID account:(NSString *)login {
   std::string key = rail::sourceKey(binding);
   NSArray *parts = [S(binding.resource) componentsSeparatedByString:@"/"];
-  if (parts.count != 2) return;
+  if (parts.count != 2 || _inFlight.count(key)) return;
   _inFlight.insert(key);
   NSString *repoPath = [NSString stringWithFormat:@"/repos/%@/%@", parts[0], parts[1]];
   __weak ProjectStatusService *weak = self;
@@ -453,17 +539,17 @@ NSString *ShortError(NSError *error) {
     ProjectStatusService *strong = weak; if (!strong) return;
     if (status == 401) { strong->_inFlight.erase(key); strong->_snapshot.connections[connectionID].access = rail::Access::rejected; [strong changed]; return; }
     if (status == 404 || status == 403) {
-      strong->_inFlight.erase(key); rail::SourceStatus source; source.notCovered = true; source.checkedAt = Now();
-      strong->_snapshot.sources[key] = source; [strong changed]; return;
+      strong->_inFlight.erase(key); rail::SourceStatus source; source.notCovered = true;
+      [strong storeSource:source key:key]; [strong changed]; return;
     }
     NSString *branch = Str(Dict(body)[@"default_branch"]);
-    __block int pending = 2; __block rail::SourceStatus result;
+    __block int pending = 3; __block rail::SourceStatus result;
     result.defaultBranch = C(branch); result.pullRequestsURL = C([NSString stringWithFormat:@"https://github.com/%@/%@/pulls", parts[0], parts[1]]);
     if (status != 200) result.error = C([NSString stringWithFormat:@"GitHub answered HTTP %ld", (long)status]);
     void (^complete)(void) = ^{
       if (--pending) return;
       ProjectStatusService *inner = weak; if (!inner) return;
-      inner->_inFlight.erase(key); result.checkedAt = Now(); inner->_snapshot.sources[key] = result; [inner changed];
+      inner->_inFlight.erase(key); [inner storeSource:result key:key]; [inner changed];
     };
     NSString *runs = Query([repoPath stringByAppendingString:@"/actions/runs"], branch.length ? @{@"branch":branch,@"per_page":@"30"} : @{@"per_page":@"30"});
     [strong gitHubGET:runs token:token done:^(id runsBody, NSInteger runsStatus) {
@@ -472,6 +558,22 @@ NSString *ShortError(NSError *error) {
         NSDictionary *run = Dict(item); if (!run || !seen.insert(C(Str(run[@"workflow_id"]))).second) continue;
         result.runs.push_back({C(Str(run[@"name"])), C(Str(run[@"run_number"])), C(Str(run[@"head_branch"])),
                                rail::githubRunResult(C(Str(run[@"status"])), C(Str(run[@"conclusion"]))), C(Str(run[@"html_url"])), ISODate(Str(run[@"updated_at"]))});
+      }
+      if (runsStatus != 200 && result.error.empty()) result.error = "Couldn't read workflow runs";
+      complete();
+    }];
+    // Runs the user started by hand, on any branch.
+    if (!login.length) complete();
+    else [strong gitHubGET:Query([repoPath stringByAppendingString:@"/actions/runs"], @{@"actor":login,@"event":@"workflow_dispatch",@"per_page":@"20"}) token:token done:^(id runsBody, NSInteger runsStatus) {
+      std::set<std::string> seen;
+      for (id item in List(Dict(runsBody)[@"workflow_runs"])) {
+        NSDictionary *found = Dict(item); if (!found || !seen.insert(C(Str(found[@"workflow_id"]))).second) continue;
+        rail::PipelineRun run;
+        run.name = C(Str(found[@"name"])); run.number = C(Str(found[@"run_number"])); run.branch = C(Str(found[@"head_branch"])); run.url = C(Str(found[@"html_url"]));
+        run.id = C(Str(found[@"id"])); run.definitionID = C(Str(found[@"workflow_id"]));
+        run.result = rail::githubMyRunResult(C(Str(found[@"status"])), C(Str(found[@"conclusion"])));
+        run.startedAt = ISODate(Str(found[@"run_started_at"])); run.finishedAt = [Str(found[@"status"]) isEqualToString:@"completed"] ? ISODate(Str(found[@"updated_at"])) : 0;
+        result.myRuns.push_back(run);
       }
       if (runsStatus != 200 && result.error.empty()) result.error = "Couldn't read workflow runs";
       complete();
@@ -497,7 +599,7 @@ NSString *ShortError(NSError *error) {
           if (status == 200) for (id c in List(Dict(body)[@"check_runs"])) {
             NSDictionary *run = Dict(c); if (!run || !seen.insert(C(Str(run[@"name"]))).second) continue;
             rail::PullRequestCheck check; check.kind = "build"; check.name = C(Str(run[@"name"])); check.url = C(Str(run[@"html_url"]));
-            check.state = rail::githubCheckState(C(Str(run[@"status"])), C(Str(run[@"conclusion"])));
+            check.state = rail::githubCheckState(C(Str(run[@"status"])), C(Str(run[@"conclusion"]))); check.startedAt = ISODate(Str(run[@"started_at"]));
             result.myPullRequests[i].checks.push_back(check);
           }
           complete();
@@ -562,7 +664,7 @@ NSString *ShortError(NSError *error) {
         ProjectStatusService *last = weak; if (!last) return;
         NSString *login = userStatus == 200 ? Str(Dict(user)[@"login"]) : @"";
         auto &state = last->_snapshot.connections[C(connectionID)]; state.access = rail::Access::signedIn; state.account = C(login);
-        last->_connectionChecked.erase(C(connectionID));
+        last->_sourceChecked.clear();
         done(login, nil); [last changed];
       }];
     }];

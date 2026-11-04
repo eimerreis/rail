@@ -70,9 +70,12 @@ Rail uses its own **Rail Safe Storage** Keychain entry for Chromium's cookie enc
 | Open Settings (appearance, tabs, DevTools, Spaces, sessions, projects, connections) | Settings button in the rail or **⌘ ,** |
 | Show the Space's projects | **Projects** at the top of the sidebar, or **⌘ ⇧ H** |
 | Show your own pull requests and their checks | **Activity** in the sidebar, or **⌘ ⇧ A** |
+| Follow your own pull requests and the pipelines you started | The Checks capsule in the toolbar, or **⌘ ⇧ K** for its list |
 | Add a project | Projects → Add project, or File → Add Current Page as Project on a repo page |
 | Add a tab to a project as Local / INT / PROD / link | Right-click the tab → Add to Project |
 | Add environments and links, rename, move, remove | **…** on a project card |
+
+Projects and Activity refresh on their own. Rail follows every Space in the background, checking about every 20 seconds while something of yours is running and about every 2 minutes otherwise, and slowing down if a provider asks it to. The toolbar's **capsule** counts your Tracked Runs: your own open pull requests, and pipelines you started by hand on any branch. It widens to announce a pass or an approval a run is waiting on, and a failure stays announced until you dismiss it, open the run or show it in Activity. Anything that failed while Rail was closed appears without an announcement. An amber triangle means the picture may be out of date, for example after signing out. Rail only tells you what happens in-app; macOS notifications aren't used. See [GLOSSARY.md](GLOSSARY.md) for the terms.
 
 Work and Personal are reusable named sessions. Tabs in the same named session share cookies and site storage, even across Spaces. **Isolated** gives that tab a separate, persistent profile. It keeps its login after unloading and restarting; it is not an incognito mode. Changing sessions reloads the current URL in the chosen profile.
 

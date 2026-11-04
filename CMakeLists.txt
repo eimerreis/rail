@@ -20,7 +20,7 @@ option(RAIL_DISTRIBUTION "Use timestamped Developer ID signatures for distributi
 # `defaults write de.eimerreis.rail GitHubClientID <id>`.
 set(RAIL_GITHUB_CLIENT_ID "" CACHE STRING "Client ID of the Rail GitHub App")
 
-add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp src/Reading.cpp)
+add_library(BrowserModel STATIC src/BrowserModel.cpp src/History.cpp src/Projects.cpp src/Reading.cpp src/TrackedRuns.cpp)
 target_include_directories(BrowserModel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -34,6 +34,9 @@ if(BUILD_TESTING)
   add_executable(ProjectsTests tests/ProjectsTests.cpp)
   target_link_libraries(ProjectsTests PRIVATE BrowserModel)
   add_test(NAME ProjectsTests COMMAND ProjectsTests)
+  add_executable(TrackedRunsTests tests/TrackedRunsTests.cpp)
+  target_link_libraries(TrackedRunsTests PRIVATE BrowserModel)
+  add_test(NAME TrackedRunsTests COMMAND TrackedRunsTests)
   add_executable(ReadingTests tests/ReadingTests.cpp)
   target_link_libraries(ReadingTests PRIVATE BrowserModel)
   add_test(NAME ReadingTests COMMAND ReadingTests)
@@ -139,6 +142,7 @@ add_executable(Rail MACOSX_BUNDLE
   src/ProjectStatus.mm
   src/ProjectsView.mm
   src/ActivityView.mm
+  src/ChecksCapsule.mm
   src/SettingsWindow.mm
   src/Keychain.mm
   src/FeedParser.mm

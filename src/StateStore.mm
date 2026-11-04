@@ -62,6 +62,36 @@ bool SaveHistory(NSString *directory, const History &history, NSError **error) {
   if (!data) return false;
   return [data writeToFile:[directory stringByAppendingPathComponent:@"history.json"] options:NSDataWritingAtomic error:error];
 }
+bool LoadTrackedRuns(NSString *directory, TrackedRuns &runs) {
+  NSData *data = [NSData dataWithContentsOfFile:[directory stringByAppendingPathComponent:@"tracked-runs.json"]];
+  id value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  if (![value isKindOfClass:NSDictionary.class] || Number(value[@"version"],0) != 1) return false;
+  runs.runs.clear();
+  for (id item in Array(value[@"runs"])) {
+    if (![item isKindOfClass:NSDictionary.class] || Text(item[@"key"]).empty()) continue;
+    TrackedRun run;
+    run.key = Text(item[@"key"]); run.sourceKey = Text(item[@"sourceKey"]); run.kind = Text(item[@"kind"]); run.revision = Text(item[@"revision"]);
+    run.title = Text(item[@"title"]); run.project = Text(item[@"project"]); run.spaceID = Text(item[@"spaceID"]); run.sessionID = Text(item[@"sessionID"]);
+    run.number = Text(item[@"number"]); run.url = Text(item[@"url"]); run.pageURL = Text(item[@"pageURL"]);
+    std::string state = Text(item[@"state"]);
+    run.state = state == "failed" ? RunState::failed : state == "passed" ? RunState::passed : state == "waiting" ? RunState::waiting : RunState::running;
+    run.startedAt = Number(item[@"startedAt"],0); run.changedAt = Number(item[@"changedAt"],0);
+    run.acknowledged = ReadBoolean(item[@"acknowledged"],false); run.passedSeen = ReadBoolean(item[@"passedSeen"],false); run.cleared = ReadBoolean(item[@"cleared"],false);
+    runs.runs.push_back(run);
+  }
+  return true;
+}
+bool SaveTrackedRuns(NSString *directory, const TrackedRuns &runs, NSError **error) {
+  if (![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:error]) return false;
+  NSMutableArray *items = [NSMutableArray array];
+  for (const auto &r : runs.runs) {
+    NSString *state = r.state == RunState::failed ? @"failed" : r.state == RunState::passed ? @"passed" : r.state == RunState::waiting ? @"waiting" : @"running";
+    [items addObject:@{@"key":S(r.key),@"sourceKey":S(r.sourceKey),@"kind":S(r.kind),@"revision":S(r.revision),@"title":S(r.title),@"project":S(r.project),@"spaceID":S(r.spaceID),@"sessionID":S(r.sessionID),@"number":S(r.number),@"url":S(r.url),@"pageURL":S(r.pageURL),@"state":state,@"startedAt":@(r.startedAt),@"changedAt":@(r.changedAt),@"acknowledged":@(r.acknowledged),@"passedSeen":@(r.passedSeen),@"cleared":@(r.cleared)}];
+  }
+  NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"version":@1,@"runs":items} options:0 error:error];
+  if (!data) return false;
+  return [data writeToFile:[directory stringByAppendingPathComponent:@"tracked-runs.json"] options:NSDataWritingAtomic error:error];
+}
 bool LoadProjects(NSString *directory, Projects &projects, NSError **error) {
   NSString *path = [directory stringByAppendingPathComponent:@"projects.json"];
   if (![NSFileManager.defaultManager fileExistsAtPath:path]) { projects.state = {}; return true; }
