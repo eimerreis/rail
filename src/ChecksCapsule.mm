@@ -219,7 +219,8 @@ RailButton *DismissAction(void (^handler)(void), NSColor *ink) {
   y += 6;
   CGFloat height = MIN(y,MaxListHeight);
   _document.frame = NSMakeRect(0,0,ListWidth,y);
-  self.frame = NSMakeRect(0,0,ListWidth,height); _scroll.frame = self.bounds;
+  // Size only: the popover owns this view's origin, and resetting it pushes the list out of place.
+  [self setFrameSize:NSMakeSize(ListWidth,height)]; _scroll.frame = self.bounds;
   [_scroll.contentView scrollToPoint:NSMakePoint(0,MIN(offset.y,MAX(0,y-height)))]; [_scroll reflectScrolledClipView:_scroll.contentView];
   return NSMakeSize(ListWidth,height);
 }
