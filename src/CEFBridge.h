@@ -7,5 +7,7 @@ CefRefPtr<CefApp> MakeRailApp(BrowserController *controller);
 void ShowRailDevTools(BrowserController *controller, CefRefPtr<CefBrowser> browser, const std::string &tabID, uint64_t generation,
   bool docked, const CefPoint &inspectAt = CefPoint());
 bool RailNavigationAllowed(const CefString &url);
+// A file on this Mac. Web pages can't reach these; only the user or another local file can.
+bool RailIsFileURL(const CefString &url);
 // Eligible for a native confirmation, never automatic OS execution.
 bool RailIsExternalAppURL(const CefString &url);

@@ -47,6 +47,9 @@
   <key>NSLocationUsageDescription</key><string>Allow websites you approve to use your location.</string>
   <!-- Passkey sign-in with a phone (WebAuthn hybrid) uses Bluetooth; without this key macOS kills the app. -->
   <key>NSBluetoothAlwaysUsageDescription</key><string>Allow websites to sign you in with a passkey on your phone and to connect to Bluetooth devices you approve.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Allow Rail to show files from your Desktop when you open them by address.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Allow Rail to show files from your Documents folder when you open them by address.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Allow Rail to show files from your Downloads folder when you open them by address.</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>LSFileQuarantineEnabled</key><true/>

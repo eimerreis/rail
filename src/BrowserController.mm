@@ -95,17 +95,38 @@ NSString *AddressSymbol(const std::string &url) {
   NSString *scheme = [NSURLComponents componentsWithString:S(url)].scheme.lowercaseString;
   if ([scheme isEqualToString:@"https"]) return @"lock.fill";
   if ([scheme isEqualToString:@"http"]) return @"exclamationmark.triangle";
+  if ([scheme isEqualToString:@"file"]) return @"doc";
   return @"magnifyingglass";
+}
+// File addresses are often pasted with raw spaces; escape those and keep any existing escapes.
+NSString *FileAddress(NSString *text) {
+  NSMutableCharacterSet *allowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
+  [allowed addCharactersInString:@"%?#"];
+  NSString *escaped = [text stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+  NSURLComponents *parts = escaped ? [NSURLComponents componentsWithString:escaped] : nil;
+  NSString *address = [parts.path hasPrefix:@"/"] ? parts.URL.absoluteString : nil;
+  return address && RailIsFileURL(C(address)) ? address : nil;
+}
+// "/a/b" and "~/a/b" name files literally, so "%", "?" and "#" are part of the name. No file
+// system access: this runs on every keystroke, and touching a protected folder prompts.
+NSString *PathAddress(NSString *text) {
+  BOOL home = [text isEqualToString:@"~"] || [text hasPrefix:@"~/"];
+  if (!home && ![text hasPrefix:@"/"]) return nil;
+  NSString *path = home ? [NSHomeDirectory() stringByAppendingString:[text substringFromIndex:1]] : text;
+  NSString *escaped = [path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet];
+  return escaped ? [@"file://" stringByAppendingString:escaped] : nil;
 }
 NSString *NormalizedAddress(NSString *input) {
   NSString *text = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
   if (!text.length) return nil;
   if ([text isEqualToString:@"about:blank"]) return text;
+  if ([text.lowercaseString hasPrefix:@"file:"]) return FileAddress(text);
+  if (NSString *path = PathAddress(text)) return path;
   if ([text rangeOfString:@"://"].location != NSNotFound) {
     NSURLComponents *parts = [NSURLComponents componentsWithString:text];
     return ([@[@"http",@"https"] containsObject:parts.scheme.lowercaseString] && parts.host.length) ? parts.URL.absoluteString : nil;
   }
-  if ([text hasPrefix:@"javascript:"] || [text hasPrefix:@"file:"] || [text hasPrefix:@"data:"]) return nil;
+  if ([text hasPrefix:@"javascript:"] || [text hasPrefix:@"data:"]) return nil;
   BOOL noSpaces = [text rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location == NSNotFound;
   if (noSpaces && ([text containsString:@"."] || [text hasPrefix:@"localhost"] || [text hasPrefix:@"[::1]"])) {
     BOOL local = [text hasPrefix:@"localhost"] || [text hasPrefix:@"127."] || [text hasPrefix:@"[::1]"];
@@ -1431,7 +1452,7 @@ static NSString *ShortAge(double time);
 }
 - (void)addressEntered:(id)sender { (void)sender; [self navigateTo:_address.stringValue]; }
 - (void)navigateTo:(NSString *)address {
-  NSString *url=NormalizedAddress(address); if (!url) { [self setStatus:@"Enter a web address or a search. Supported addresses use http or https."]; return; }
+  NSString *url=NormalizedAddress(address); if (!url) { [self setStatus:@"Enter a web address or a search. Supported addresses use http, https or file."]; return; }
   if (_homeVisible || _readingVisible) {
     // Typing on the Space home or in Reading opens a new tab instead of replacing the last page.
     _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now());
@@ -2588,7 +2609,7 @@ static NSString *ShortAge(double time) {
   NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=title; alert.informativeText=info ?: @""; [alert addButtonWithTitle:@"OK"];
   [alert beginSheetModalForWindow:_window completionHandler:nil];
 }
-- (NSString *)addressFromInput:(NSString *)input { NSString *url=NormalizedAddress(input); return url && ![url hasPrefix:@"https://duckduckgo.com/?"] ? url : nil; }
+- (NSString *)addressFromInput:(NSString *)input { NSString *url=NormalizedAddress(input); return url && ![url hasPrefix:@"https://duckduckgo.com/?"] && !RailIsFileURL(C(url)) ? url : nil; }
 - (void)newProject:(id)sender {
   (void)sender; const auto *active=_model.tab(_model.state.activeTabID);
   std::string url=active && rail::recognizeRepo(active->url) ? rail::recognizeRepo(active->url).repoURL() : "";
