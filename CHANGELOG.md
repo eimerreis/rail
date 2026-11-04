@@ -1,5 +1,11 @@
 # rail
 
+## 0.2.1
+
+### Patch Changes
+
+- 9787d29: Keep J and K working when a tab finishes loading behind Reading, and keep reading list rows clear of classic, always-visible scrollbars.
+
 ## 0.2.0
 
 ### Minor Changes
