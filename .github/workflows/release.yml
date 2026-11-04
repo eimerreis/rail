@@ -10,7 +10,8 @@ on:
 # Serialize versioning through publication. PR checks use independent groups.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('rail-pr-{0}', github.event.pull_request.number) || 'rail-release' }}
-  cancel-in-progress: false
+  # A new push replaces its PR's checks; a release is never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -39,6 +40,34 @@ jobs:
           set -euo pipefail
           if [[ "$BASE" =~ ^0+$ ]]; then BASE=$(git rev-list --max-parents=0 "$HEAD"); fi
           npm run changeset:check -- --base "$BASE" --head "$HEAD"
+
+  smoke:
+    name: Smoke tests
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      # The default PR ref: the change as it would land on main.
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build without release signing
+        run: ./scripts/build.sh -DRAIL_SIGN_IDENTITY=-
+      - name: Exercise the real Chromium engine
+        run: ./scripts/release-smoke.sh
+      - name: Preserve failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-diagnostics
+          path: |
+            .runtime-test/**/app.log
+            .runtime-test/**/*.png
+          # The profiles live in a dot directory, which uploads skip by default.
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   plan:
     needs: changesets
@@ -148,17 +177,7 @@ jobs:
             "-DRAIL_UPDATE_FEED_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml" \
             "-DRAIL_GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
       - name: Exercise the real Chromium engine
-        run: |
-          uv pip install --python .tools/bin/python 'pillow==13.0.0'
-          export PATH="$PWD/.tools/bin:$PATH"
-          node scripts/smoke-test.mjs
-          node scripts/projects-smoke.mjs
-          node scripts/devtools-smoke.mjs
-          node scripts/context-menu-smoke.mjs
-          node scripts/theme-smoke.mjs
-          node scripts/find-smoke.mjs
-          node scripts/passwords-smoke.mjs
-          node scripts/reading-smoke.mjs
+        run: ./scripts/release-smoke.sh
       - name: Notarize and sign the update feed
         env:
           NOTARYTOOL_PROFILE: rail-release
