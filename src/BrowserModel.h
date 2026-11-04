@@ -32,6 +32,10 @@ struct Tab {
     std::string pinnedTitle;
     // A name the user gave a pinned tab; it replaces the page title until the tab is unpinned.
     std::string customTitle;
+    // When a snoozed tab comes back; 0 for a tab that isn't snoozed. Snoozed tabs stay
+    // in their Space and position but are left out of its visible tabs until then.
+    double snoozedUntil = 0;
+    bool snoozed() const { return snoozedUntil > 0; }
     const std::string& shownTitle() const { return customTitle.empty() ? title : customTitle; }
 };
 
@@ -99,6 +103,18 @@ public:
     // Names a pinned tab; a blank name goes back to the page title.
     bool renameTab(const std::string& id, const std::string& name);
     bool moveTab(const std::string& tabID, const std::string& targetSpaceID, double now);
+    // Hides tabs until the given time and moves off the active tab if it is one of them.
+    // Pinned tabs and unknown IDs are skipped; false when nothing was snoozed.
+    bool snoozeTabs(const std::vector<std::string>& ids, double until, double now);
+    // Puts a snoozed tab back in its Space without selecting it. Selecting a tab also wakes it.
+    bool wakeTab(const std::string& id, double now);
+    // Wakes the tabs whose time has come and returns their IDs.
+    std::vector<std::string> wakeDueTabs(double now);
+    // The Space's sidebar list, top to bottom: tabs that are neither pinned nor snoozed.
+    std::vector<std::string> listedTabs(const std::string& spaceID) const;
+    // The listed tabs from one tab to another inclusive, in either direction.
+    // Just the destination when the starting tab isn't listed; empty when the destination isn't.
+    std::vector<std::string> tabRange(const std::string& spaceID, const std::string& from, const std::string& to) const;
     std::string addSpace(const std::string& name, const std::string& sessionID, double now);
     std::string addSession(const std::string& name);
     std::vector<std::string> idleTabs(double now) const;

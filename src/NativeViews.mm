@@ -99,6 +99,8 @@ NSTextField *RailLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColo
 - (void)invoke:(id)sender { (void)sender; if (self.handler) self.handler(); }
 - (void)setProgress:(CGFloat)progress { _progress = progress; self.needsDisplay = YES; }
 - (void)mouseDown:(NSEvent *)event {
+  NSEventModifierFlags selecting = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift);
+  if (selecting && self.onModifiedClick) { self.onModifiedClick(selecting); return; }
   if (event.clickCount == 2 && self.onDoubleClick) { self.onDoubleClick(); return; }
   if (!self.dragTabID.length) { [super mouseDown:event]; return; }
   // Decide between a click and a drag before handing the gesture to AppKit.
