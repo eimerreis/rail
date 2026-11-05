@@ -34,6 +34,8 @@ Queued pushes batch the pending changesets on the latest `main`. If another push
 
 The pre-commit hook validates the staged index. The **Changesets** GitHub Actions check validates every new commit on pull requests and pushes to `main`, so an earlier changeset cannot cover a later change. Make **Changesets** a required branch check to enforce this before merging. Local hook setup does not alter remote branch protection. The workflow needs permission to push generated release metadata to `main`; branch rules must permit that bot update.
 
+Commits with a `chore(deps):` subject, and merges of branches made up only of those commits, don't need a changeset in the **Changesets** check, so Dependabot updates pass without one and ship with the next release. The pre-commit hook still requires one, because it runs before the commit message exists.
+
 Generated version commits are the exception to the new-changeset requirement. They contain only the generated package version, lockfile version, changelog, and changeset deletions, and the version must match the consumed changesets. Contributors normally only run `npm run changeset`; versioning happens in CI. `npm run changeset:version` remains available for local inspection and tests.
 
 With no pending changesets, an already-published version is skipped. An unpublished version from a failed run is retried without another version bump. **Release Rail → Run workflow** performs the same status/version/retry flow on `main`. The job tags the tested version as `v<version>`, uses the generated changelog entry for GitHub release notes, and publishes through the existing signed Sparkle feed. Failed uploads can reuse the same tag only when it still points to the same source, and only draft assets may be replaced.

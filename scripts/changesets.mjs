@@ -37,7 +37,7 @@ export function releaseNotes(changelog, version) {
 }
 
 // Validate the staged index or an actual commit, never unstaged working-tree files.
-export function checkChange(cwd, base, head) {
+export function checkChange(cwd, base, head, { changesetOptional = false } = {}) {
   const paths = git(cwd, 'diff', '--no-renames', '--name-only', '-z', base, ...(head === 'index' ? ['--cached'] : [head])).split('\0').filter(Boolean);
   if (!paths.length) throw new Error('No staged changes.');
   const before = JSON.parse(readAt(cwd, base, 'package.json') || 'null');
@@ -65,7 +65,7 @@ export function checkChange(cwd, base, head) {
   }
 
   const added = paths.filter(path => isChangeset(path) && readAt(cwd, base, path) === null && readAt(cwd, head, path) !== null);
-  if (!added.length) throw new Error('Every change commit needs a new changeset. Run npm run changeset and stage the generated .changeset/*.md file.');
+  if (!added.length && !changesetOptional) throw new Error('Every change commit needs a new changeset. Run npm run changeset and stage the generated .changeset/*.md file.');
   for (const path of paths.filter(isChangeset)) {
     const content = readAt(cwd, head, path);
     if (content === null) throw new Error('Only version commits may consume changesets. Run npm run changeset:version.');
@@ -75,12 +75,21 @@ export function checkChange(cwd, base, head) {
   return { kind: 'change' };
 }
 
+// Dependabot commits as `chore(deps): ...`. These updates ship with the next release instead of forcing their own.
+const isDependencyUpdateSubject = subject => /^chore\(deps\)!?:/.test(subject);
+function isDependencyUpdate(cwd, commit) {
+  const isMerge = git(cwd, 'rev-list', '--parents', '-n', '1', commit).trim().split(' ').length > 2;
+  const range = isMerge ? [`${commit}^1..${commit}^2`] : ['-n', '1', commit];
+  const subjects = git(cwd, 'log', '--format=%s', ...range).trim().split('\n').filter(Boolean);
+  return subjects.length > 0 && subjects.every(isDependencyUpdateSubject);
+}
+
 export function checkRange(cwd, base, head) {
   const commits = git(cwd, 'rev-list', '--reverse', `${base}..${head}`).trim().split('\n').filter(Boolean);
   for (const commit of commits) {
     // Adoption starts when the configuration is introduced; do not police old history.
     if (readAt(cwd, commit, '.changeset/config.json') === null) continue;
-    try { checkChange(cwd, `${commit}^1`, commit); }
+    try { checkChange(cwd, `${commit}^1`, commit, { changesetOptional: isDependencyUpdate(cwd, commit) }); }
     catch (error) { throw new Error(`${commit.slice(0, 8)}: ${error.message}`); }
   }
   return commits.length;
