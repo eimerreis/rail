@@ -1,5 +1,11 @@
 # rail
 
+## 0.5.2
+
+### Patch Changes
+
+- 067db7a: Keep Rail's build dependencies and release tooling up to date with Dependabot.
+
 ## 0.5.1
 
 ### Patch Changes
