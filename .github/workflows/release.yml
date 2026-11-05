@@ -21,11 +21,11 @@ jobs:
     name: Changesets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -48,9 +48,9 @@ jobs:
     timeout-minutes: 60
     steps:
       # The default PR ref: the change as it would land on main.
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Build without release signing
@@ -59,7 +59,7 @@ jobs:
         run: ./scripts/release-smoke.sh
       - name: Preserve failure logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-diagnostics
           path: |
@@ -81,12 +81,12 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Read the latest main after acquiring the release lock; queued pushes batch.
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -120,12 +120,12 @@ jobs:
       RAIL_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
       RAIL_APP_VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.plan.outputs.sha }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - run: npm ci
@@ -206,7 +206,7 @@ jobs:
           gh release edit "$RAIL_RELEASE_TAG" --title "Rail $RAIL_APP_VERSION" --notes-file .cache/release-notes.md --draft=false --latest
       - name: Preserve failure logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-diagnostics
           path: .runtime-test/**/app.log
