@@ -80,6 +80,50 @@ test('every commit is checked, so an earlier changeset cannot cover a later comm
   assert.throws(() => checkRange(cwd, base, head), /Every change commit needs/);
 });
 
+test('a chore(deps) commit needs no changeset, but other commit types still do', t => {
+  const cwd = fixture(t), base = git(cwd, 'rev-parse', 'HEAD').trim();
+  write(cwd, 'deps.txt', 'bumped\n'); const head = commit(cwd, 'chore(deps): bump the npm-minor-and-patch group');
+  assert.equal(checkRange(cwd, base, head), 1);
+  for (const subject of ['chore: tidy up', 'chore(deps-dev): bump a', 'fix(deps): bump b', 'see chore(deps): bump c']) {
+    const before = git(cwd, 'rev-parse', 'HEAD').trim();
+    write(cwd, 'deps.txt', `${subject}\n`); const other = commit(cwd, subject);
+    assert.throws(() => checkRange(cwd, before, other), /Every change commit needs/, subject);
+    git(cwd, 'reset', '-q', '--hard', before);
+  }
+});
+
+test('merging a chore(deps) branch needs no changeset, but a mixed branch still does', t => {
+  const cwd = fixture(t), base = git(cwd, 'rev-parse', 'HEAD').trim();
+  git(cwd, 'checkout', '-qb', 'deps');
+  write(cwd, 'deps.txt', 'bumped\n'); commit(cwd, 'chore(deps): bump a');
+  git(cwd, 'checkout', '-q', 'main');
+  git(cwd, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1 from dependabot/a', 'deps');
+  const merged = git(cwd, 'rev-parse', 'HEAD').trim();
+  assert.equal(checkRange(cwd, base, merged), 2);
+
+  git(cwd, 'checkout', '-qb', 'mixed');
+  write(cwd, 'deps.txt', 'bumped again\n'); commit(cwd, 'chore(deps): bump b');
+  write(cwd, 'app.cpp', '// feature\n'); addChangeset(cwd, 'mixed'); commit(cwd, 'Add a feature');
+  git(cwd, 'checkout', '-q', 'main');
+  git(cwd, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-m', 'Merge pull request #2 from a/mixed', 'mixed');
+  assert.equal(checkChange(cwd, 'HEAD^1', 'HEAD').kind, 'change');
+
+  git(cwd, 'checkout', '-qb', 'unlabelled', merged);
+  write(cwd, 'app.cpp', '// no changeset\n'); commit(cwd, 'Add another feature');
+  git(cwd, 'checkout', '-q', 'main'); git(cwd, 'reset', '-q', '--hard', merged);
+  git(cwd, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-m', 'Merge pull request #3 from a/unlabelled', 'unlabelled');
+  const head = git(cwd, 'rev-parse', 'HEAD').trim();
+  assert.throws(() => checkChange(cwd, 'HEAD^1', 'HEAD'), /Every change commit needs/);
+  assert.throws(() => checkRange(cwd, merged, head), /Every change commit needs/);
+});
+
+test('a chore(deps) commit cannot hand-edit the version or consume changesets', t => {
+  const cwd = fixture(t); addChangeset(cwd); commit(cwd, 'With changeset');
+  const before = git(cwd, 'rev-parse', 'HEAD').trim();
+  git(cwd, 'rm', '-q', '.changeset/first.md'); const head = commit(cwd, 'chore(deps): bump a');
+  assert.throws(() => checkRange(cwd, before, head), /Only version commits may consume/);
+});
+
 test('editing an existing changeset alone cannot cover another commit', t => {
   const cwd = fixture(t); addChangeset(cwd); commit(cwd, 'First change');
   addChangeset(cwd, 'first', 'minor'); git(cwd, 'add', '.changeset/first.md');
