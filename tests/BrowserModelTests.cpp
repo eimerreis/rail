@@ -1,5 +1,6 @@
 #include "BrowserModel.h"
 #include "PinnedTabLayout.h"
+#include "PagePresentation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -101,6 +102,49 @@ void idleTimeoutUsesStrictBoundary() {
     const auto afterSwitch = model.idleTabs(1100);
     require(std::find(afterSwitch.begin(), afterSwitch.end(), previous) == afterSwitch.end(), "old active tab should get a fresh idle interval");
     require(model.idleTabs(0).empty(), "clock moving backward should not expire tabs");
+}
+
+void initialMediaPresentationFollowsSelectionNotSessionOrSpaceMemory() {
+    rail::BrowserModel model;
+    const auto source = model.state.activeTabID;
+    const auto background = model.addTab("work", "https://example.com/video", 1, "work", source, true);
+    require(model.state.activeTabID == source && model.tab(background)->originTabID == source,
+            "initial media gating must preserve background selection and its close-return source");
+    rail::PagePresentation page;
+    require(!page.update(model.pageSelected(background, false), true, false), "background link must remain hidden");
+    require(page.initiallyHidden(), "initial media gate must remain closed");
+    require(model.tab(source)->sessionID == model.tab(background)->sessionID, "gate must not split shared sessions");
+
+    model.selectTab(background, 3);
+    require(!page.update(model.pageSelected(background, false), false, false), "selection while creating is not presentation");
+    require(page.initiallyHidden(), "creating browser must keep its initial gate");
+    require(!page.update(model.pageSelected(background, true), true, false), "Home or Reading must not activate media");
+    model.selectSpace("personal", 4);
+    require(model.space("work")->selectedTabID == background, "hidden Space should remember its selection");
+    require(!page.update(model.pageSelected(background, false), true, false), "remembered selection in hidden Space must not activate media");
+    model.selectSpace("work", 5);
+    require(page.update(model.pageSelected(background, false), true, false), "first actual presentation should release media");
+    require(!page.initiallyHidden(), "initial media gate must be released");
+    model.selectTab(source, 6);
+    require(!page.update(model.pageSelected(background, false), true, false), "switching away still hides the tab container");
+    require(!page.initiallyHidden(), "switching away must not rearm the initial playback gate");
+    model.setIsolated(background);
+    rail::PagePresentation replacement;
+    require(!replacement.update(model.pageSelected(background, false), true, false) && replacement.initiallyHidden(), "new browser generation in a hidden tab must start gated");
+    require(!model.pageSelected("missing", false), "unknown tabs cannot be presented");
+    model.state.activeTabID = background;
+    model.state.activeSpaceID = "personal";
+    require(!model.pageSelected(background, false), "mismatched active Space must fail closed");
+}
+
+void closingBrowsersCannotActivateMedia() {
+    rail::PagePresentation page;
+    require(!page.update(true, true, true) && page.initiallyHidden(), "close or quit before creation finishes must not activate media");
+    require(page.update(true, true, false) && !page.initiallyHidden(), "cancelled close may present the selected page");
+    require(page.update(true, true, true), "visited page must stay visible behind its unload-confirmation sheet");
+    require(!page.update(false, true, true) && !page.initiallyHidden(), "closing a visited page must not rearm its media gate");
+    rail::PagePresentation recreated;
+    require(recreated.initiallyHidden(), "unload, restore or session recreation must not reuse the previous browser's gate");
 }
 
 void pinningTogglesOnlyTheRequestedTab() {
@@ -1111,6 +1155,8 @@ int main(int argc, char** argv) {
         {"snooze-close", closingALastVisibleTabIgnoresSnoozedOnes},
         {"snooze-sanitize", sanitizeWakesOverdueAndInvalidSnoozes},
         {"tab-range", tabRangesFollowTheSidebarList},
+        {"initial-media-presentation", initialMediaPresentationFollowsSelectionNotSessionOrSpaceMemory},
+        {"initial-media-close", closingBrowsersCannotActivateMedia},
     };
     unsigned passed = 0;
     unsigned failed = 0;

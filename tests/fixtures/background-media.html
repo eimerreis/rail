@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rail initial background media fixture</title>
+<style>body { font: 16px system-ui; padding: 24px; } a, button { display: block; margin: 20px; } video { width: 160px; }</style>
+<main id="launcher">
+  <a id="middle" href="/player?case=middle">Middle-click video</a>
+  <a id="cmd" href="/player?case=cmd">Command-click video</a>
+  <a id="context" href="/player?case=context">Context menu video</a>
+  <a id="target" target="_blank" href="/player?case=target">Background target popup</a>
+  <button id="popup">Script popup with an initially empty URL</button>
+</main>
+<script>
+const query = new URLSearchParams(location.search);
+const key = query.get('case') || 'launcher';
+window.fixture = { ready: false, ticks: 0, errors: [] };
+document.querySelector('#popup').onclick = () => {
+  const popup = window.open('', '_blank');
+  if (popup) popup.location = '/player?case=popup';
+};
+if (location.pathname.endsWith('/player')) {
+  document.querySelector('#launcher').remove();
+  document.cookie = 'mediaSession=shared; Path=/; SameSite=Lax';
+  for (const [tag, source] of [['audio', '/tone.wav'], ['video', '/clip.webm']]) {
+    const media = document.createElement(tag);
+    media.autoplay = media.loop = true;
+    media.controls = true;
+    media.muted = tag === 'video';
+    media.volume = 0.02;
+    media.addEventListener('playing', () => fetch(`/event?case=${key}&media=${tag}`));
+    media.addEventListener('error', () => fixture.errors.push(`${tag}:${media.error?.code}`));
+    media.src = source;
+    document.body.append(media);
+    // Test scripted play as well as the autoplay attribute. Do not retry on
+    // visibility changes: Chromium must resume its own deferred media load.
+    media.play().catch(error => fixture.errors.push(`${tag}:${error.name}`));
+  }
+  if (!query.has('child')) {
+    const frame = document.createElement('iframe');
+    frame.src = `/player?case=${key}-child&child=1`;
+    document.body.append(frame);
+  }
+}
+setInterval(() => { fixture.ticks++; }, 100);
+fixture.ready = true;
+</script>

@@ -100,6 +100,8 @@ public:
                        double now, const std::string& sessionID = "",
                        const std::string& originTabID = "", bool background = false);
     bool selectTab(const std::string& id, double now);
+    // A remembered selection in a hidden Space is not a presented page.
+    bool pageSelected(const std::string& id, bool covered) const;
     bool selectSpace(const std::string& id, double now);
     // Pending asynchronous closes are not eligible return destinations.
     bool closeTab(const std::string& id, double now, const std::vector<std::string>& closingTabIDs = {});
