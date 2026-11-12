@@ -348,6 +348,36 @@ bool BrowserModel::setPinned(const std::string& id, bool pinned) {
     current->pinned = pinned;
     return true;
 }
+bool BrowserModel::reorderPinnedTab(const std::string& id, const std::string& beforeID) {
+    const auto* current = tab(id);
+    if (!current || !current->pinned || !space(current->spaceID)) return false;
+    if (!beforeID.empty()) {
+        const auto* before = tab(beforeID);
+        if (!before || !before->pinned || before->spaceID != current->spaceID) return false;
+    }
+    std::vector<size_t> slots;
+    size_t from = 0, to = 0;
+    for (size_t i = 0; i < state.tabs.size(); ++i) {
+        const auto& candidate = state.tabs[i];
+        if (!candidate.pinned || candidate.spaceID != current->spaceID) continue;
+        if (candidate.id == id) from = slots.size();
+        if (candidate.id == beforeID) to = slots.size();
+        slots.push_back(i);
+    }
+    if (beforeID.empty()) to = slots.size();
+    if (to > from) --to;
+    // Rotate only pins, not intervening regular/snoozed tabs or another Space's tabs.
+    while (from < to) { std::swap(state.tabs[slots[from]], state.tabs[slots[from + 1]]); ++from; }
+    while (from > to) { std::swap(state.tabs[slots[from]], state.tabs[slots[from - 1]]); --from; }
+    return true;
+}
+std::vector<std::string> BrowserModel::pinnedTabs(const std::string& spaceID) const {
+    std::vector<std::string> pins;
+    for (const auto& current : state.tabs) {
+        if (current.spaceID == spaceID && current.pinned) pins.push_back(current.id);
+    }
+    return pins;
+}
 bool BrowserModel::renameTab(const std::string& id, const std::string& name) {
     auto* current = tab(id);
     if (!current || !current->pinned) return false;

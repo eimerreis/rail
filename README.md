@@ -58,6 +58,7 @@ Rail uses its own **Rail Safe Storage** Keychain entry for Chromium's cookie enc
 | Select a tab in the current Space | **⌘ 1–9** |
 | Switch to recently used tabs | Hold **⌃** and press **Tab** (**⇧** to go back); release **⌃** to switch |
 | Pin or unpin a tab | Drag it into or out of **Pinned**, or right-click it |
+| Reorder pinned tabs | Drag a pin within **Pinned**; the insertion line shows its new position, left to right then top to bottom. Each Space keeps its order across restarts |
 | Rename a pinned tab | Double-click it, or right-click → Rename Tab… (empty name restores the page title) |
 | Zoom the window | Double-click the top bar (follows the title bar setting in Desktop & Dock) |
 | See recent downloads | Downloads button beside the session picker; click a file to open it, the magnifier to show it in Finder |
@@ -144,6 +145,7 @@ node scripts/smoke-test.mjs     # Node 22+: actual native app + Chromium integra
 node scripts/devtools-smoke.mjs # DevTools docking, close button, shortcut/menu toggles and lifecycle
 node scripts/context-menu-smoke.mjs # Right-click links/images, background tabs, image clipboard formats
 node scripts/find-smoke.mjs     # Live find bar, counts, navigation, wraparound, keyboard, focus and tab isolation
+node scripts/pinned-tabs-smoke.mjs # Pinned ordering, insertion feedback, pin/unpin, selection, Spaces and restart
 node scripts/projects-smoke.mjs # Projects and Activity, health checks, sign-in states, opening environments
 node scripts/external-app-smoke.mjs # Desktop callbacks, confirmation, redirects and actual macOS handoff
 node scripts/theme-smoke.mjs    # All three themes: live switching, no stale surfaces, relaunch, fallback; saves screenshots
@@ -152,6 +154,8 @@ node scripts/theme-smoke.mjs    # All three themes: live switching, no stale sur
 `theme-smoke.mjs` samples pixels with python3 and Pillow. Its full-window screenshots, web content included, need Screen Recording permission for the terminal; without it, it still saves captures of Rail's own views.
 
 `context-menu-smoke.mjs` preserves and restores the clipboard while checking image copying. Set `RAIL_TEST_MOCK_KEYCHAIN=1` to run this check with Chromium's mock Keychain when local Keychain access is unavailable; that mode does not verify real Keychain encryption.
+
+`pinned-tabs-smoke.mjs` drives the native drop callbacks in a disposable profile and saves insertion-feedback captures. It checks all control sizes and themes, but not AppKit's physical drag gesture. Also check manually: drag pins before/after tiles and across rows in a scrolled sidebar, cancel a drag, unpin/repin, and drag a pin or selected regular tabs onto a Space. The insertion line should follow the pointer, disappear on exit, and the saved order should survive relaunch.
 
 The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. Automation requires an explicit data directory and refuses the normal browser profile. Tests use a separate **Rail Test Safe Storage** Keychain entry, shared across test runs, with real Chromium cookie encryption. The normal browser keeps using **Rail Safe Storage**. Keep the same signing certificate to retain Keychain approvals; a locked login Keychain can still require unlocking. The control channel and remote debugging are enabled only by explicit test arguments.
 

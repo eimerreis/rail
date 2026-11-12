@@ -1,4 +1,5 @@
 #include "BrowserModel.h"
+#include "PinnedTabLayout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -110,6 +111,137 @@ void pinningTogglesOnlyTheRequestedTab() {
     require(model.togglePin(id), "pinned tab should be unpinnable");
     require(!model.tab(id)->pinned, "tab should now be unpinned");
     require(!model.togglePin("missing"), "missing tab should be rejected");
+}
+
+rail::BrowserModel pinnedOrderingFixture(size_t count) {
+    rail::BrowserModel model;
+    for (size_t i = 0; i < count; ++i) {
+        const auto suffix = std::to_string(i);
+        const auto id = "pin-" + suffix;
+        model.state.tabs.push_back({id, "work", i % 2 ? "personal" : "isolated-" + id,
+                                    "Page " + suffix, "https://example.com/" + suffix + "/deep", true,
+                                    10 + static_cast<double>(i), "https://example.com/" + suffix,
+                                    "Home " + suffix, "Pin " + suffix});
+        model.tab(id)->originTabID = model.state.activeTabID;
+        model.state.tabs.push_back({"regular-" + suffix, "work", "work", "Regular", "about:blank", false,
+                                    0, "", "", "", i % 2 ? 1000.0 : 0.0});
+        model.state.tabs.push_back({"other-" + suffix, "personal", "personal", "Other pin", "about:blank", true,
+                                    0, "about:blank", "Other pin", ""});
+    }
+    if (count) model.selectTab("pin-0", 100);
+    return model;
+}
+
+void requireUnchangedTab(const rail::Tab& actual, const rail::Tab& expected) {
+    require(actual.id == expected.id && actual.spaceID == expected.spaceID && actual.sessionID == expected.sessionID
+                && actual.title == expected.title && actual.url == expected.url && actual.pinned == expected.pinned
+                && actual.lastUsed == expected.lastUsed && actual.pinnedURL == expected.pinnedURL
+                && actual.pinnedTitle == expected.pinnedTitle && actual.customTitle == expected.customTitle
+                && actual.snoozedUntil == expected.snoozedUntil && actual.originTabID == expected.originTabID,
+            "reordering must preserve every tab's identity, session, page, pin metadata and timestamps");
+}
+
+void pinnedTabsReorderAtEveryInsertionGap() {
+    // Exhaust both directions, every row wrap, first/last positions and the two
+    // gaps around the dragged tab (both are no-ops). Interleave unrelated tabs.
+    for (size_t count = 1; count <= 7; ++count) {
+        for (size_t from = 0; from < count; ++from) {
+            for (size_t gap = 0; gap <= count; ++gap) {
+                auto model = pinnedOrderingFixture(count);
+                const auto before = model.state;
+                const auto pins = model.pinnedTabs("work");
+                const auto listed = model.listedTabs("work");
+                const auto range = model.tabRange("work", listed.front(), listed.back());
+                auto expected = pins;
+                expected.erase(expected.begin() + from);
+                expected.insert(expected.begin() + (gap > from ? gap - 1 : gap), pins[from]);
+                require(model.reorderPinnedTab(pins[from], gap < count ? pins[gap] : ""), "valid pinned gap should succeed");
+                require(model.pinnedTabs("work") == expected, "pins should follow the chosen insertion gap without off-by-one errors");
+                require(model.listedTabs("work") == listed && model.tabRange("work", listed.front(), listed.back()) == range,
+                        "regular tab order and multi-selection ranges must not change");
+                require(model.state.activeTabID == before.activeTabID && model.state.activeSpaceID == before.activeSpaceID,
+                        "reordering must not change the active tab or Space");
+                for (const auto& owner : before.spaces)
+                    require(model.space(owner.id)->selectedTabID == owner.selectedTabID, "each Space must keep its remembered tab");
+                require(model.state.tabs.size() == before.tabs.size(), "reordering must neither create nor remove tabs");
+                for (size_t i = 0; i < before.tabs.size(); ++i) {
+                    const auto& original = before.tabs[i];
+                    requireUnchangedTab(*model.tab(original.id), original);
+                    if (!original.pinned || original.spaceID != "work")
+                        require(model.state.tabs[i].id == original.id, "unrelated tabs must retain even their absolute stored positions");
+                }
+                // Startup sanitization must retain a valid reordered layout.
+                model.sanitize(200);
+                require(model.pinnedTabs("work") == expected, "reordered pins should survive startup sanitization");
+            }
+        }
+    }
+}
+
+void pinnedReorderingRejectsInvalidTargetsWithoutMutation() {
+    auto model = pinnedOrderingFixture(3);
+    const auto before = model.state.tabs;
+    for (const auto& ids : std::vector<std::pair<std::string, std::string>>{
+             {"missing", "pin-0"}, {"regular-0", "pin-0"}, {"regular-1", ""},
+             {"pin-0", "missing"}, {"pin-0", "regular-0"}, {"pin-0", "regular-1"},
+             {"pin-0", "other-0"}, {"other-0", "pin-0"}}) {
+        require(!model.reorderPinnedTab(ids.first, ids.second), "unknown, unpinned and cross-Space targets must be rejected");
+        for (size_t i = 0; i < before.size(); ++i) requireUnchangedTab(model.state.tabs[i], before[i]);
+    }
+    model.tab("pin-0")->spaceID = "missing";
+    require(!model.reorderPinnedTab("pin-0"), "an orphaned pin must not be reordered");
+    require(model.pinnedTabs("missing") == std::vector<std::string>{"pin-0"}, "listing should only filter the stored Space ID");
+    rail::BrowserModel empty;
+    require(empty.pinnedTabs("work").empty() && empty.pinnedTabs("unknown").empty(), "Spaces without pins should have an empty order");
+    require(!empty.reorderPinnedTab(empty.state.activeTabID), "an empty pinned section must not pin a regular tab implicitly");
+}
+
+void reorderedPinsStillUnpinCloseAndMoveNormally() {
+    auto model = pinnedOrderingFixture(4);
+    require(model.reorderPinnedTab("pin-3", "pin-0"), "last pin should move first");
+    require(model.closeTab("pin-3", 110), "reordered pin should close normally");
+    require(model.pinnedTabs("work") == std::vector<std::string>({"pin-3", "pin-0", "pin-1", "pin-2"}), "closing must keep the new pin order");
+    require(model.tab("pin-3")->url == "https://example.com/3", "closing must still reset to the saved pinned page");
+    require(model.reopenClosedTab(120) == "pin-3" && model.tab("pin-3")->url == "https://example.com/3/deep", "undo must restore the page, not the old pin position");
+    require(model.setPinned("pin-3", false) && model.tab("pin-3")->customTitle.empty(), "unpinning must still clear pin metadata");
+    require(model.pinnedTabs("work") == std::vector<std::string>({"pin-0", "pin-1", "pin-2"}), "unpinning should remove only that tile");
+    require(model.setPinned("pin-3", true) && model.reorderPinnedTab("pin-3"), "repinned tab should be reorderable to the end");
+    const auto session = model.tab("pin-3")->sessionID;
+    require(model.moveTab("pin-3", "research", 130), "reordered pin should still move to a Space");
+    require(model.pinnedTabs("research") == std::vector<std::string>{"pin-3"} && model.tab("pin-3")->sessionID == session,
+            "moving a reordered pin must preserve its session and pin state");
+    require(model.state.activeTabID == "pin-3" && model.state.activeSpaceID == "research", "selection should still follow an active pin moved to another Space");
+}
+
+void pinnedInsertionGeometryMatchesTheNativeGrid() {
+    for (double width : {180.0, 210.0, 301.0, 420.0}) {
+        // Document coordinates do not change with scroll offset or control scale.
+        const rail::PinnedTabLayout layout{width, 104};
+        const auto first = layout.tile(0), second = layout.tile(1), nextRow = layout.tile(2);
+        require(first.x == 12 && first.y == 104 && first.height == 36, "grid should keep its existing native inset and tile height");
+        require(second.x == first.x + first.width + 6 && nextRow.x == first.x && nextRow.y == first.y + 42, "grid should remain two columns with the existing spacing");
+        for (size_t count = 0; count <= 9; ++count) {
+            require(layout.insertionIndex(count, 0, 0) == 0, "heading should choose the first gap");
+            require(layout.insertionIndex(count, width, 2000) == count, "below the grid should append");
+            for (size_t i = 0; i < count; ++i) {
+                const auto tile = layout.tile(i);
+                require(layout.insertionIndex(count, tile.x + tile.width * .25, tile.y + 18) == i, "left half should insert before the tile");
+                require(layout.insertionIndex(count, tile.x + tile.width * .75, tile.y + 18) == i + 1, "right half should insert after the tile");
+            }
+            for (size_t gap = 0; gap <= count; ++gap) {
+                const auto marker = layout.insertionMarker(count, gap);
+                require(marker.width == 3 && marker.height == 36 && marker.x >= 0 && marker.x + marker.width <= width, "insertion line must be visible inside every supported sidebar width");
+                const auto target = layout.tile(count && gap == count ? count - 1 : gap);
+                require(marker.y == target.y, "marker should lead the next tile, or trail the last tile when appending");
+                require(layout.insertionIndex(count, marker.x + marker.width / 2, marker.y + marker.height / 2) == gap, "every marker must hit-test back to exactly its insertion gap");
+            }
+            if (count % 2) {
+                const auto empty = layout.tile(count);
+                require(layout.insertionIndex(count, empty.x + empty.width / 2, empty.y + 18) == count, "the empty half of an odd final row must append");
+            }
+        }
+        require(layout.insertionIndex(4, 0, first.y + 38) == 0 && layout.insertionIndex(4, 0, first.y + 40) == 2, "row gaps should switch at their midpoint");
+    }
 }
 
 void switchingNamedSessionPreservesSpace() {
@@ -933,6 +1065,10 @@ int main(int argc, char** argv) {
         {"selection", selectionRemembersEachSpace},
         {"idle", idleTimeoutUsesStrictBoundary},
         {"pinning", pinningTogglesOnlyTheRequestedTab},
+        {"pinned-order-gaps", pinnedTabsReorderAtEveryInsertionGap},
+        {"pinned-order-invalid", pinnedReorderingRejectsInvalidTargetsWithoutMutation},
+        {"pinned-order-lifecycle", reorderedPinsStillUnpinCloseAndMoveNormally},
+        {"pinned-insertion-layout", pinnedInsertionGeometryMatchesTheNativeGrid},
         {"named-session-switch", switchingNamedSessionPreservesSpace},
         {"isolation", isolatedSessionsAreStableAndUnique},
         {"add-tab", tabsUseSpaceDefaultOrValidOverride},

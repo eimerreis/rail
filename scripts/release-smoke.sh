@@ -9,6 +9,7 @@ node scripts/smoke-test.mjs
 node scripts/projects-smoke.mjs
 node scripts/devtools-smoke.mjs
 node scripts/context-menu-smoke.mjs
+node scripts/pinned-tabs-smoke.mjs
 node scripts/theme-smoke.mjs
 node scripts/find-smoke.mjs
 node scripts/passwords-smoke.mjs

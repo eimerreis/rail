@@ -14,6 +14,7 @@
 #import "PasswordPalette.h"
 #import "AddressInput.h"
 #include "SearchEngine.h"
+#include "PinnedTabLayout.h"
 #include "include/cef_process_message.h"
 #include <set>
 #include "include/cef_request_context.h"
@@ -214,7 +215,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   // Ctrl+Tab switcher: tabs of the current Space, most recently used first, while Ctrl is held.
   RailSuggestionList *_tabSwitcher;
   std::vector<std::string> _switcherTabs;
-  CGFloat _pinnedSectionEnd;
+  CGFloat _pinnedGridStart, _pinnedSectionEnd;
   CGFloat _dragStartWidth, _devToolsStartWidth;
   // How far the rail and sidebar are shown, 0 to 1; animates toward sidebarVisible.
   CGFloat _sidebarReveal;
@@ -549,8 +550,9 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   RailButton *settings = RailAction(@"",@"slider.horizontal.3",@"Settings",^{ [weak showSettings:nil]; }); settings.centered = YES; settings.tag = 901; [_rail addSubview:settings];
   const auto *space = _model.space(_model.state.activeSpaceID);
   _spaceLabel.stringValue = space ? S(space->name) : @"Space";
-  NSPoint offset = _tabScroll.contentView.bounds.origin; CGFloat side = _model.state.sidebarWidth, pinWidth = floor((side-30)/2);
+  NSPoint offset = _tabScroll.contentView.bounds.origin; CGFloat side = _model.state.sidebarWidth;
   for (NSView *v in [_tabDocument.subviews copy]) [v removeFromSuperview];
+  _dropIndicator.hidden=YES;
   [_tabDocument addSubview:_dropIndicator];
   CGFloat y = 4; NSUInteger pins = 0, sleeping = 0;
   // A selection only covers tabs on show: it ends with a Space switch or when its tabs go.
@@ -585,6 +587,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   }
   for (const auto &t : _model.state.tabs) if (t.spaceID == _model.state.activeSpaceID && !t.snoozed() && !_runtime.count(t.id) && t.url != "about:blank") sleeping++;
   NSTextField *pinHeading = RailLabel(@"Pinned",10,NSFontWeightSemibold,RailMuted()); pinHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:pinHeading]; y += 24;
+  _pinnedGridStart=y; const rail::PinnedTabLayout pinLayout{side,y};
   for (const auto &tab : _model.state.tabs) {
     if (tab.spaceID != _model.state.activeSpaceID || !tab.pinned) continue;
     std::string tid = tab.id;
@@ -592,13 +595,14 @@ static NSString *SnoozeLabel(double until, BOOL full) {
     [self applyFaviconFor:tab.url button:button sleeping:!_runtime.count(tid) && tab.url != "about:blank"]; button.dragTabID = S(tid);
     button.onDoubleClick = ^{ [weak renameTabID:tid]; };
     BOOL selectedPin = tab.id == _model.state.activeTabID && !_homeVisible;
-    button.font = RailFont(11,selectedPin ? NSFontWeightSemibold : NSFontWeightRegular); button.frame = NSMakeRect(12+(pins%2)*(pinWidth+6),y+(pins/2)*42,pinWidth,36);
+    const auto frame=pinLayout.tile(pins);
+    button.font = RailFont(11,selectedPin ? NSFontWeightSemibold : NSFontWeightRegular); button.frame = NSMakeRect(frame.x,frame.y,frame.width,frame.height);
     button.normalFill = RailTint(selectedPin ? RailRoleSelected : RailRolePin); button.hoverFill = RailTint(selectedPin ? RailRoleSelectedHover : RailRoleHover); button.stroke = RailTint(selectedPin ? RailRoleSelected : RailRoleLine);
     button.ink = selectedPin ? RailTint(RailRoleSelectedInk) : _runtime.count(tab.id) || tab.url == "about:blank" ? RailInk() : RailMuted();
     button.toolTip = [NSString stringWithFormat:@"%@ · %@%@",S(tab.shownTitle()),[self sessionName:tab.sessionID],_runtime.count(tab.id) ? @"" : @" · Reloads on open"];
     button.menu = [self menuForTab:tid]; [_tabDocument addSubview:button]; pins++;
   }
-  if (pins) y += ((pins+1)/2)*42 + 12;
+  if (pins) y += ((pins+1)/2)*rail::PinnedTabLayout::rowHeight + 12;
   else { NSTextField *hint = RailLabel(@"Drag a tab here to pin it.",10,NSFontWeightRegular,RailMuted()); hint.frame=NSMakeRect(15,y,side-30,18); [_tabDocument addSubview:hint]; y += 35; }
   _pinnedSectionEnd = y;
   NSTextField *tabHeading = RailLabel(@"Tabs",10,NSFontWeightSemibold,RailMuted()); tabHeading.frame = NSMakeRect(15,y,side-30,16); [_tabDocument addSubview:tabHeading]; y += 23;
@@ -1186,18 +1190,32 @@ static NSString *ShortAge(double time);
   if (_runsDirty) _runsDirty=!rail::SaveTrackedRuns(_directory,_runs,nil);
   if (_projectsDirty && _projectsSavingAllowed) { NSError *projectError=nil; _projectsDirty=!rail::SaveProjects(_directory,_projects,&projectError); if (_projectsDirty) [self setStatus:[NSString stringWithFormat:@"Could not save projects: %@",projectError.localizedDescription]]; }
 }
-// Dragging a tab into the Pinned section pins it; dragging a pinned tab out unpins it.
+// Pins reorder within their grid; crossing the section boundary still pins/unpins.
 - (NSDragOperation)tabDragOver:(NSString *)tabID at:(NSPoint)point drop:(BOOL)drop {
   const auto *tab=_model.tab(C(tabID)); BOOL pin=point.y<_pinnedSectionEnd;
-  if (!tab || tab->spaceID!=_model.state.activeSpaceID || tab->pinned==pin) { _dropIndicator.hidden=YES; return NSDragOperationNone; }
+  if (!tab || tab->spaceID!=_model.state.activeSpaceID || !NSPointInRect(point,_tabDocument.bounds) || (!pin && !tab->pinned)) { _dropIndicator.hidden=YES; return NSDragOperationNone; }
+  const BOOL reorder=pin && tab->pinned;
+  const auto pins=_model.pinnedTabs(_model.state.activeSpaceID);
+  const rail::PinnedTabLayout layout{_model.state.sidebarWidth,_pinnedGridStart};
+  const size_t index=layout.insertionIndex(pins.size(),point.x,point.y);
+  const std::string before=index<pins.size() ? pins[index] : "";
   if (drop) {
     // The dragged button is rebuilt by refresh, so the change waits until the drag session finishes.
-    std::string id=tab->id; __weak BrowserController *weak=self;
-    dispatch_async(dispatch_get_main_queue(), ^{ BrowserController *strong=weak; if (!strong || !strong->_model.setPinned(id,pin)) return; [strong refresh]; [strong saveSoon]; });
+    std::string id=tab->id, space=tab->spaceID; __weak BrowserController *weak=self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      BrowserController *strong=weak; if (!strong) return;
+      const auto *current=strong->_model.tab(id);
+      if (!current || current->spaceID!=space || strong->_model.state.activeSpaceID!=space) return;
+      if (reorder ? !strong->_model.reorderPinnedTab(id,before) : !strong->_model.setPinned(id,pin)) return;
+      [strong refresh]; [strong saveSoon];
+    });
     _dropIndicator.hidden=YES; return NSDragOperationMove;
   }
   CGFloat side=_model.state.sidebarWidth, height=_tabDocument.bounds.size.height;
-  _dropIndicator.frame=pin ? NSMakeRect(5,0,side-10,_pinnedSectionEnd-6) : NSMakeRect(5,_pinnedSectionEnd-2,side-10,MAX(40,height-_pinnedSectionEnd-2));
+  _dropIndicator.fill=RailTint(reorder ? RailRoleFocus : RailRoleSelected);
+  _dropIndicator.layer.cornerRadius=reorder ? 1.5 : 8; _dropIndicator.layer.borderWidth=reorder ? 0 : 1.5;
+  if (reorder) { const auto marker=layout.insertionMarker(pins.size(),index); _dropIndicator.frame=NSMakeRect(marker.x,marker.y,marker.width,marker.height); }
+  else _dropIndicator.frame=pin ? NSMakeRect(5,0,side-10,_pinnedSectionEnd-6) : NSMakeRect(5,_pinnedSectionEnd-2,side-10,MAX(40,height-_pinnedSectionEnd-2));
   _dropIndicator.hidden=NO; return NSDragOperationMove;
 }
 // Dropping a tab on a Space icon in the rail moves it to that Space.
@@ -2845,6 +2863,32 @@ static NSString *ShortAge(double time) {
     else if ([action isEqual:@"close"]) [self closeTabID:tabID];
     else if ([action isEqual:@"session"]) [self changeSession:C(command[@"session"]) tab:tabID];
     else if ([action isEqual:@"pin"]) { _model.togglePin(tabID); [self refresh]; }
+    else if ([action isEqual:@"tabDrag"]) {
+      // Drive the registered native destination callbacks in document coordinates;
+      // this deliberately does not pretend to synthesize an AppKit drag session.
+      RailPanel *target=[command[@"target"] isEqual:@"rail"] ? _rail : _tabDocument;
+      NSPoint point=NSMakePoint([command[@"x"] doubleValue],[command[@"y"] doubleValue]);
+      if (target==_rail && [command[@"space"] isKindOfClass:NSString.class]) {
+        for (size_t i=0;i<_model.state.spaces.size();++i) if (_model.state.spaces[i].id==C(command[@"space"])) {
+          NSView *icon=[_rail viewWithTag:1000+i]; point=NSMakePoint(NSMidX(icon.frame),NSMidY(icon.frame)); break;
+        }
+      }
+      if ([command[@"phase"] isEqual:@"end"]) { if (target.onTabDragEnd) target.onTabDragEnd(); }
+      else if ([command[@"phase"] isEqual:@"drop"]) { if (target.onTabDrop) target.onTabDrop(S(tabID),point); }
+      else if (target.onTabDragOver) target.onTabDragOver(S(tabID),point);
+    }
+    else if ([action isEqual:@"tabModifiedClick"]) {
+      NSMutableArray<NSView *> *queue=[NSMutableArray arrayWithArray:_tabDocument.subviews];
+      while (queue.count) {
+        NSView *view=queue.firstObject; [queue removeObjectAtIndex:0]; [queue addObjectsFromArray:view.subviews];
+        if (![view isKindOfClass:RailButton.class]) continue;
+        RailButton *button=(RailButton *)view;
+        if (![button.dragTabID isEqual:S(tabID)]) continue;
+        if (button.onModifiedClick) button.onModifiedClick([command[@"shift"] boolValue] ? NSEventModifierFlagShift : NSEventModifierFlagCommand);
+        else [button performClick:nil];
+        break;
+      }
+    }
     else if ([action isEqual:@"age"]) { if (auto *tab=_model.tab(tabID)) tab->lastUsed=Now()-_model.state.idleMinutes*60-1; [self checkIdle]; }
     else if ([action isEqual:@"sidebar"]) [self toggleSidebar:nil];
     else if ([action isEqual:@"key"]) {
@@ -3004,6 +3048,14 @@ static NSString *ShortAge(double time) {
   for (const auto &run : _runs.listed(Now())) [listedRuns addObject:@{@"key":S(run.key),@"state":@((int)run.state),@"acknowledged":@(run.acknowledged)}];
   NSDictionary *checks=@{@"visible":@(!_capsule.hidden),@"running":@(runCounts.running),@"waiting":@(runCounts.waiting),@"failed":@(runCounts.failed),@"passed":@(runCounts.passed),@"announcing":_capsule.announceTitle ?: @"",@"listOpen":@(_checksPopover.shown),@"runs":listedRuns};
   NSDictionary *snapshot=@{@"checks":checks,@"keyWindow":windowState,@"readingVisible":@(_readingVisible),@"reading":[_reading automationState],@"find":find,@"passwords":_passwordFixtureOrigin.length ? ([_passwordPalette automationState] ?: @{}) : @{},@"sheetText":sheetText,@"sheet":_window.attachedSheet ? @"open" : @"",@"status":_statusLabel.stringValue ?: @"",@"home":@(_homeVisible),@"homePage":_homePage == 1 ? @"activity" : @"projects",@"projects":projects,@"command":_automationID ?: @"",@"activeTab":S(_model.state.activeTabID),@"activeSpace":S(_model.state.activeSpaceID),@"sidebarVisible":@(_model.state.sidebarVisible),@"settings":_settingsWindow.window.isVisible ? _settingsWindow.pane : @"",@"sidebarAnimation":S(_model.state.sidebarAnimation),@"theme":S(_model.state.theme),@"appliedTheme":RailCurrentTheme(),@"appearance":_window.effectiveAppearance.name ?: @"",@"settingsAppearance":_settingsWindow.window.effectiveAppearance.name ?: @"",@"windowNumber":@(_window.windowNumber),@"rootSize":@[@(_root.bounds.size.width),@(_root.bounds.size.height)],@"settingsWindowNumber":@(_settingsWindow.window.isVisible ? _settingsWindow.window.windowNumber : 0),@"devTools":[self activeDevToolsMode],@"tabs":tabs,@"runtimeCount":@(_runtime.size())};
-  [[NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
+  NSMutableArray *pinFrames=[NSMutableArray array], *selection=[NSMutableArray array];
+  for (NSView *view in _tabDocument.subviews) if ([view isKindOfClass:RailButton.class] && ((RailButton *)view).dragTabID.length) {
+    NSRect f=view.frame; [pinFrames addObject:@{@"tab":((RailButton *)view).dragTabID,@"frame":@[@(f.origin.x),@(f.origin.y),@(f.size.width),@(f.size.height)]}];
+  }
+  for (const auto &id:_model.listedTabs(_model.state.activeSpaceID)) if (_tabSelection.count(id)) [selection addObject:S(id)];
+  NSRect marker=_dropIndicator.frame;
+  NSMutableDictionary *withDrag=[snapshot mutableCopy];
+  withDrag[@"tabDrag"]=@{@"pins":pinFrames,@"selection":selection,@"width":@(_model.state.sidebarWidth),@"start":@(_pinnedGridStart),@"end":@(_pinnedSectionEnd),@"visible":@(!_dropIndicator.hidden),@"indicator":@[@(marker.origin.x),@(marker.origin.y),@(marker.size.width),@(marker.size.height)]};
+  [[NSJSONSerialization dataWithJSONObject:withDrag options:NSJSONWritingPrettyPrinted error:nil] writeToFile:[_directory stringByAppendingPathComponent:@"automation-state.json"] atomically:YES];
 }
 @end
