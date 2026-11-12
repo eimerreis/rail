@@ -327,6 +327,235 @@ void closingBackgroundTabPreservesSelection() {
     require(model.tab(active)->lastUsed == 30, "remaining tab should receive selection timestamp");
 }
 
+void closingReturnsToTheOriginRatherThanSidebarOrRecentOrder() {
+    rail::BrowserModel model;
+    const auto first = model.state.activeTabID;
+    const auto origin = model.addTab("work", "https://origin.example/", 10);
+    const auto child = model.addTab("work", "about:blank", 20);
+    require(model.tab(child)->originTabID == origin, "new tabs should remember the selected source");
+    model.selectTab(first, 30);
+    model.selectTab(child, 40);
+    require(model.closeTab(child, 50), "child should close");
+    require(model.state.activeTabID == origin, "origin should beat sidebar order and a more recently selected tab");
+    const auto nested = model.addTab("work", "https://nested.example/", 60);
+    const auto leaf = model.addTab("work", "https://leaf.example/", 70);
+    require(model.closeTab(leaf, 80) && model.state.activeTabID == nested, "nested close should return one level");
+    require(model.closeTab(nested, 90) && model.state.activeTabID == origin, "another close should return to the original source");
+}
+
+void backgroundTabsRememberTheirSourceWithoutSelectingIt() {
+    rail::BrowserModel model;
+    const auto source = model.state.activeTabID;
+    const auto active = model.addTab("work", "https://active.example/", 10);
+    const auto sourceTime = model.tab(source)->lastUsed;
+    const auto activeTime = model.tab(active)->lastUsed;
+    const auto background = model.addTab("work", "https://background.example/", 1000, "personal", source, true);
+    require(model.state.activeTabID == active && model.space("work")->selectedTabID == active,
+            "background creation should not change active or remembered selection");
+    require(model.tab(source)->lastUsed == sourceTime && model.tab(active)->lastUsed == activeTime,
+            "background creation should not refresh either existing tab's idle clock");
+    require(model.tab(background)->originTabID == source && model.tab(background)->sessionID == "personal",
+            "explicit source should be independent of the selected tab and session override");
+    model.selectTab(background, 1010);
+    require(model.closeTab(background, 1020) && model.state.activeTabID == source,
+            "a later-selected background tab should return to its actual source");
+
+    model.selectTab(active, 1030);
+    const auto routedSelection = model.space("personal")->selectedTabID;
+    const auto routed = model.addTab("personal", "https://routed.example/", 1040, "", source, true);
+    require(model.state.activeTabID == active && model.state.activeSpaceID == "work",
+            "background routing should not switch Spaces");
+    require(model.space("personal")->selectedTabID == routed && model.tab(routed)->sessionID == "personal",
+            "background routing should still remember the new tab in its target Space with that Space's default session");
+    model.selectTab(routed, 1050);
+    require(model.closeTab(routed, 1060) && model.state.activeTabID == routedSelection && model.state.activeSpaceID == "personal",
+            "closing a routed tab should not follow its source into another Space");
+}
+
+void unavailableOriginsFallBackToRecentTabsInTheSameSpace() {
+    for (const std::string action : {"removed", "moved", "snoozed"}) {
+        rail::BrowserModel model;
+        const auto first = model.state.activeTabID;
+        const auto recent = model.addTab("work", "https://recent.example/", 10);
+        const auto origin = model.addTab("work", "https://origin.example/", 20);
+        const auto child = model.addTab("work", "https://child.example/", 30);
+        model.selectTab(recent, 40);
+        model.selectTab(child, 50);
+        if (action == "removed") model.closeTab(origin, 60);
+        if (action == "moved") model.moveTab(origin, "personal", 60);
+        if (action == "snoozed") model.snoozeTabs({origin}, 1000, 60);
+        const auto remote = model.space("research")->selectedTabID;
+        model.selectTab(remote, 70);
+        model.selectTab(child, 80);
+        require(model.closeTab(child, 90), "child with unavailable origin should close");
+        require(model.state.activeTabID == recent && model.state.activeSpaceID == "work",
+                action + " origin should fall back to the most recently selected local tab, not the first or a remote tab");
+        require(model.tab(first), "other local tabs should stay intact");
+        if (action == "snoozed") require(model.tab(origin)->snoozed(), "close must not wake a snoozed origin");
+    }
+}
+
+void closeFallbackUsesSelectionOrderNotIdleTimestamps() {
+    for (const double selectedAt : {100.0, 0.0}) {
+        rail::BrowserModel model;
+        const auto earlier = model.addTab("work", "https://earlier.example/", 10);
+        const auto recent = model.addTab("work", "https://recent.example/", 20);
+        const auto closing = model.addTab("work", "https://closing.example/", 30, "", "missing");
+        model.selectTab(earlier, 100);
+        model.selectTab(recent, selectedAt);
+        model.selectTab(closing, selectedAt);
+        model.addTab("work", "https://unvisited.example/", 10000, "", "missing", true);
+        require(model.closeTab(closing, 10001) && model.state.activeTabID == recent,
+                "equal or backward clocks and unvisited background tabs must not reorder actual selection history");
+    }
+}
+
+void tabsWithoutSelectionHistoryHaveADeterministicFallback() {
+    rail::BrowserModel model;
+    model.state.tabs = {{"earlier", "work", "work", "Earlier", "https://earlier.example/", false, 1},
+                        {"recent", "work", "work", "Recent", "https://recent.example/", false, 2},
+                        {"tied", "work", "work", "Tied", "https://tied.example/", false, 2},
+                        {"closing", "work", "work", "Closing", "https://closing.example/", false, 3}};
+    model.state.activeTabID = "closing";
+    model.space("work")->selectedTabID = "closing";
+    require(model.closeTab("closing", 4) && model.state.activeTabID == "recent",
+            "without runtime history, timestamps then sidebar order should break ties deterministically");
+}
+
+void movingAChildDoesNotReturnAcrossSpaces() {
+    rail::BrowserModel model;
+    const auto origin = model.state.activeTabID;
+    const auto local = model.space("personal")->selectedTabID;
+    const auto child = model.addTab("work", "https://child.example/", 10);
+    require(model.moveTab(child, "personal", 20), "child should move");
+    require(model.closeTab(child, 30) && model.state.activeSpaceID == "personal" && model.state.activeTabID == local,
+            "a moved child should close to a local tab, not follow its origin to the old Space");
+    require(model.tab(origin)->spaceID == "work", "the source should stay in its own Space");
+}
+
+void closingRememberedBackgroundTabRepairsOnlyItsSpace() {
+    rail::BrowserModel model;
+    const auto source = model.addTab("work", "https://source.example/", 10);
+    const auto child = model.addTab("work", "https://child.example/", 20);
+    model.selectSpace("personal", 30);
+    const auto active = model.state.activeTabID;
+    require(model.closeTab(child, 40) && model.space("work")->selectedTabID == source,
+            "an inactive Space should remember the closed tab's source");
+    require(model.state.activeSpaceID == "personal" && model.state.activeTabID == active,
+            "repairing an inactive Space must not switch tabs or Spaces");
+    require(model.selectSpace("work", 50) && model.state.activeTabID == source,
+            "returning to that Space should open the repaired selection");
+}
+
+void pinnedCloseKeepsRecentBehaviorAndPinsCanBeOrigins() {
+    rail::BrowserModel model;
+    const auto origin = model.addTab("work", "https://origin.example/", 10);
+    const auto pin = model.addTab("work", "https://pin.example/", 20, "personal");
+    model.setPinned(pin, true);
+    model.renameTab(pin, "My Pin");
+    model.tab(pin)->url = "https://pin.example/deeper";
+    const auto recent = model.addTab("work", "https://recent.example/", 30);
+    model.selectTab(pin, 40);
+    require(model.closeTab(pin, 50) && model.state.activeTabID == recent,
+            "pinned close should keep recently-used behavior instead of following the pin's old origin");
+    require(model.tab(pin)->url == "https://pin.example/" && model.tab(pin)->customTitle == "My Pin"
+                && model.tab(pin)->pinned && model.tab(pin)->sessionID == "personal",
+            "pinned close should preserve the pin, custom name, home page and session");
+    model.selectTab(pin, 60);
+    const auto child = model.addTab("work", "about:blank", 70);
+    model.selectTab(origin, 80);
+    model.selectTab(child, 90);
+    require(model.closeTab(child, 100) && model.state.activeTabID == pin,
+            "a normal child should be able to return to a pinned source");
+}
+
+void undoPreservesTheOriginAndIndependentProfile() {
+    rail::BrowserModel model;
+    const auto origin = model.addTab("work", "https://origin.example/", 10);
+    const auto child = model.addTab("work", "https://child.example/", 20);
+    model.setIsolated(child);
+    require(model.closeTab(child, 30) && model.state.activeTabID == origin, "isolated child should return to its source");
+    require(model.reopenClosedTab(40) == child && model.tab(child)->originTabID == origin,
+            "undo should preserve the source identity");
+    require(model.tab(child)->sessionID == rail::BrowserModel::isolatedSessionID(child),
+            "return tracking should not share the source's named session");
+    require(model.closeTab(child, 50) && model.state.activeTabID == origin,
+            "closing the reopened child should still return to its source");
+}
+
+void multiCloseSkipsPendingDestinationsInAnyCompletionOrder() {
+    for (const bool activeFirst : {false, true}) {
+        rail::BrowserModel model;
+        const auto survivor = model.addTab("work", "https://survivor.example/", 10);
+        const auto origin = model.addTab("work", "https://origin.example/", 20);
+        const auto child = model.addTab("work", "https://child.example/", 30);
+        const std::vector<std::string> closing{origin, child};
+        if (!activeFirst) require(model.closeTab(origin, 40, closing), "background source should close first");
+        require(model.closeTab(child, 50, closing) && model.state.activeTabID == survivor,
+                "multi-close should select a survivor, never its pending source");
+        if (activeFirst) require(model.closeTab(origin, 60, closing), "background source should close last");
+        require(model.state.activeTabID == survivor, "later background completion should preserve the chosen survivor");
+        const auto lastClosed = activeFirst ? origin : child;
+        const auto firstClosed = activeFirst ? child : origin;
+        require(model.reopenClosedTab(70) == lastClosed && model.reopenClosedTab(80) == firstClosed,
+                "multi-close undo should follow actual completion order");
+        require(model.tab(child)->originTabID == origin, "multi-close undo should retain child/source relationships");
+        model.selectTab(child, 90);
+        require(model.closeTab(child, 100) && model.state.activeTabID == origin,
+                "a restored multi-close child should return to its restored source");
+    }
+}
+
+void multiCloseAllCreatesOneUndoablePlaceholder() {
+    rail::BrowserModel model;
+    const auto source = model.state.activeTabID;
+    const auto child = model.addTab("work", "https://child.example/", 10);
+    const std::vector<std::string> closing{source, child};
+    require(model.closeTab(child, 20, closing), "active child should finish first");
+    const auto blank = model.state.activeTabID;
+    require(blank != source && blank != child && model.tab(blank)->url == "about:blank",
+            "a batch with no survivor should get a fresh local blank tab");
+    require(model.closeTab(source, 30, closing) && model.state.activeTabID == blank,
+            "later completions must not create another placeholder or change selection");
+    require(model.listedTabs("work") == std::vector<std::string>{blank}, "only one placeholder should remain");
+    require(model.reopenClosedTab(40) == source && model.reopenClosedTab(50) == child && !model.tab(blank),
+            "undoing the batch should restore both tabs and remove its placeholder");
+
+    model.setPinned(child, true);
+    model.selectTab(child, 60);
+    require(model.closeTab(child, 70, {source}) && model.state.activeTabID != source,
+            "pinned close must also skip a pending destination");
+    require(model.tab(child)->pinned, "pending exclusions must not remove pinned tabs");
+    model.selectTab(source, 75);
+    model.selectTab(child, 80);
+    require(model.closeTab(child, 90) && model.state.activeTabID == source,
+            "a cancelled close should require no persistent model exclusion to clear");
+}
+
+void sanitizeRepairsRuntimeOriginsWithoutInventingSources() {
+    rail::BrowserModel model;
+    model.state.tabs = {{"../origin", "work", "work", "Origin", "https://origin.example/", false, 0},
+                        {"child", "work", "work", "Child", "https://child.example/", false, 0},
+                        {"", "work", "work", "Unrelated", "https://unrelated.example/", false, 0},
+                        {"self", "work", "work", "Self", "https://self.example/", false, 0},
+                        {"orphan", "work", "work", "Orphan", "https://orphan.example/", false, 0}};
+    model.tab("child")->originTabID = "../origin";
+    model.tab("self")->originTabID = "self";
+    model.tab("orphan")->originTabID = "missing";
+    model.selectTab("../origin", 10);
+    model.selectTab("child", 20);
+    model.sanitize(30);
+    const auto repaired = model.state.tabs.front().id;
+    require(repaired != "../origin" && model.tab("child")->originTabID == repaired,
+            "sanitizing should remap an existing source alongside its repaired tab ID");
+    require(model.state.tabs[2].originTabID.empty() && model.tab("self")->originTabID.empty()
+                && model.tab("orphan")->originTabID.empty(),
+            "empty, self and missing sources should not become unrelated destinations");
+    model.sanitize(30);
+    require(model.closeTab("child", 40) && model.state.activeTabID == repaired,
+            "source return should survive repeated sanitization");
+}
+
 void movingTabsPreservesIdentity() {
     rail::BrowserModel model;
     const auto moved = model.state.activeTabID;
@@ -717,6 +946,18 @@ int main(int argc, char** argv) {
         {"theme", themeFallsBackToPorcelain},
         {"reopen", closedTabsCanBeReopened},
         {"close-background", closingBackgroundTabPreservesSelection},
+        {"close-origin", closingReturnsToTheOriginRatherThanSidebarOrRecentOrder},
+        {"close-origin-background", backgroundTabsRememberTheirSourceWithoutSelectingIt},
+        {"close-origin-unavailable", unavailableOriginsFallBackToRecentTabsInTheSameSpace},
+        {"close-recent-order", closeFallbackUsesSelectionOrderNotIdleTimestamps},
+        {"close-recent-untracked", tabsWithoutSelectionHistoryHaveADeterministicFallback},
+        {"close-origin-moved-child", movingAChildDoesNotReturnAcrossSpaces},
+        {"close-background-remembered", closingRememberedBackgroundTabRepairsOnlyItsSpace},
+        {"close-origin-pinned", pinnedCloseKeepsRecentBehaviorAndPinsCanBeOrigins},
+        {"close-origin-undo", undoPreservesTheOriginAndIndependentProfile},
+        {"close-multi-order", multiCloseSkipsPendingDestinationsInAnyCompletionOrder},
+        {"close-multi-all", multiCloseAllCreatesOneUndoablePlaceholder},
+        {"close-origin-sanitize", sanitizeRepairsRuntimeOriginsWithoutInventingSources},
         {"move", movingTabsPreservesIdentity},
         {"external-pinned", externalLinksFindPinnedTabsAcrossSpaces},
         {"external-pinned-preference", externalLinksPreferSpecificPinsAndTheCurrentSpace},

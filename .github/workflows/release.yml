@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  # Include feature-branch bases so every layer of a stacked PR is checked.
+  pull_request: {}
 
 # Serialize versioning through publication. PR checks use independent groups.
 concurrency:

@@ -85,6 +85,8 @@ Desktop sign-in callbacks and app links (such as CleanShot's) show a native **Op
 
 Pinned tabs remember the page they were pinned on and keep a name you give them until they are unpinned. Closing a pinned tab (**⌘ W**) keeps it pinned, unloads it and returns it to that page, as in Arc.
 
+Closing a regular tab returns to the tab it was opened from, if that source is still visible in the same Space. Otherwise Rail selects the most recently used available tab in that Space, or a new blank tab if none remain. Background closes leave your current page alone; pinned closes keep their recently-used-tab behavior. Source relationships and selection history last until Rail quits, and reopening a closed tab preserves its source during that run.
+
 Links opened from other apps reuse a pinned tab for that page or a path below it, switching to its Space and keeping its session. For example, a pin for `https://github.com/acme/repo` also opens links to that repository's issues. The most specific pinned path wins; equivalent pins prefer the current Space, then the most recently used tab. Space rules take precedence. If no pin matches, the link opens in a new tab or the selected blank tab.
 
 Right-click a link for **Open Link in New Tab**, or an image for **Copy Image** and **Open Image in New Tab**. New tabs open in the background and follow the same Space and session rules as other new-tab links. Copy Image puts the image itself on the macOS clipboard; unavailable images cannot be copied.

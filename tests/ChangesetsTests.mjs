@@ -80,6 +80,14 @@ test('every commit is checked, so an earlier changeset cannot cover a later comm
   assert.throws(() => checkRange(cwd, base, head), /Every change commit needs/);
 });
 
+test('PR checks cover stacked branch bases while publication remains main-only', () => {
+  const workflow = read(root, '.github/workflows/release.yml');
+  assert.match(workflow, /^  pull_request: \{\}$/m);
+  assert.match(workflow, /^  push:\n    branches: \[main\]$/m);
+  assert.match(workflow, /if: github\.event_name == 'pull_request'/);
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main' && github\.event_name != 'pull_request'/);
+});
+
 test('a chore(deps) commit needs no changeset, but other commit types still do', t => {
   const cwd = fixture(t), base = git(cwd, 'rev-parse', 'HEAD').trim();
   write(cwd, 'deps.txt', 'bumped\n'); const head = commit(cwd, 'chore(deps): bump the npm-minor-and-patch group');

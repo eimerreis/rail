@@ -35,6 +35,9 @@ struct Tab {
     // When a snoozed tab comes back; 0 for a tab that isn't snoozed. Snoozed tabs stay
     // in their Space and position but are left out of its visible tabs until then.
     double snoozedUntil = 0;
+    // Close returns here when the source is still visible in this Space. Runtime
+    // only, like selection history; unrelated to Chromium's window.opener/session.
+    std::string originTabID;
     bool snoozed() const { return snoozedUntil > 0; }
     const std::string& shownTitle() const { return customTitle.empty() ? title : customTitle; }
 };
@@ -89,11 +92,15 @@ public:
     Space* space(const std::string& id);
     const Space* space(const std::string& id) const;
     const Session* session(const std::string& id) const;
+    // An empty origin uses the active tab. Background creation never changes the
+    // active tab/Space; a routed tab is remembered in its destination Space.
     std::string addTab(const std::string& spaceID, const std::string& url,
-                       double now, const std::string& sessionID = "");
+                       double now, const std::string& sessionID = "",
+                       const std::string& originTabID = "", bool background = false);
     bool selectTab(const std::string& id, double now);
     bool selectSpace(const std::string& id, double now);
-    bool closeTab(const std::string& id, double now);
+    // Pending asynchronous closes are not eligible return destinations.
+    bool closeTab(const std::string& id, double now, const std::vector<std::string>& closingTabIDs = {});
     // Restores the most recently closed tab and selects it; returns its ID or "".
     std::string reopenClosedTab(double now);
     bool setSession(const std::string& tabID, const std::string& sessionID);
@@ -136,6 +143,10 @@ public:
     static std::string isolatedSessionID(const std::string& tabID);
 
 private:
+    // Actual selection order, independent of lastUsed (also used for idle timing).
+    std::vector<std::string> recentTabIDs;
+    void rememberSelection(const std::string& id);
+    std::string tabAfterClose(const Tab& closed, const std::vector<std::string>& closingTabIDs) const;
     std::string ensureSpaceTab(const std::string& spaceID, double now);
     void sanitizeRules();
 };
