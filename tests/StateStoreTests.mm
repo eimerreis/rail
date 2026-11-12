@@ -45,6 +45,28 @@ int main() {
       Check(restored.state.controlSize == "large", "control size lost");
       Check(restored.state.sidebarAnimation == "subtle" && !restored.state.devToolsDocked, "sidebar animation or DevTools placement lost");
       Check(restored.tab(tabID)->pinned && !restored.state.sidebarVisible && restored.state.idleMinutes == 30 && restored.state.sidebarWidth == 300, "preferences lost");
+      {
+        rail::BrowserModel ordered = original;
+        const auto second = ordered.addTab("work","https://example.com/second",2,"personal"); ordered.setPinned(second,true);
+        const auto third = ordered.addTab("work","https://example.com/third",3); ordered.setPinned(third,true);
+        const auto last = ordered.addTab("work","https://example.com/last",4); ordered.setPinned(last,true); ordered.setIsolated(last);
+        const auto other = ordered.addTab("personal","https://example.com/other",5); ordered.setPinned(other,true);
+        ordered.selectTab(tabID,6);
+        const auto listed = ordered.listedTabs("work");
+        Check(ordered.reorderPinnedTab(last,tabID) && ordered.reorderPinnedTab(tabID), "pin reordering failed");
+        const std::vector<std::string> expected{last,second,third,tabID};
+        Check(rail::SaveState(directory,ordered,&error), "reordered pins save failed");
+        rail::BrowserModel loadedOrder;
+        Check(rail::LoadState(directory,loadedOrder,&error), "reordered pins load failed");
+        Check(loadedOrder.pinnedTabs("work") == expected, "pinned order lost across restart");
+        Check(loadedOrder.pinnedTabs("personal") == std::vector<std::string>{other}, "other Space's pin order changed");
+        Check(loadedOrder.listedTabs("work") == listed && loadedOrder.tab(snoozedID)->snoozedUntil == snoozedUntil, "reordering moved or woke regular tabs");
+        Check(loadedOrder.state.activeTabID == tabID && loadedOrder.space("work")->selectedTabID == tabID, "reordering changed remembered selection");
+        Check(loadedOrder.tab(tabID)->customTitle == "My notes" && loadedOrder.tab(tabID)->pinnedURL == original.tab(tabID)->pinnedURL, "reordering lost pin metadata");
+        Check(loadedOrder.tab(last)->sessionID == rail::BrowserModel::isolatedSessionID(last) && loadedOrder.tab(second)->sessionID == "personal", "reordering changed sessions");
+        Check(rail::SaveState(directory,loadedOrder,&error) && rail::LoadState(directory,loadedOrder,&error) && loadedOrder.pinnedTabs("work") == expected, "pin order changed on a second restart");
+        std::cout << "PASS reordered pins persist across restarts without changing sessions, Spaces, selection or snoozes\n";
+      }
       rail::History history; history.recordVisit("https://example.com/",5); history.setTitle("https://example.com/","Example");
       Check(rail::SaveHistory(directory,history,&error), "history save failed");
       rail::History loadedHistory;

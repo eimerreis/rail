@@ -109,6 +109,10 @@ public:
     bool setIsolated(const std::string& tabID);
     bool togglePin(const std::string& id);
     bool setPinned(const std::string& id, bool pinned);
+    // Moves a pin before another pin in its Space; an empty destination puts it last.
+    // Only that Space's pinned slots change. Invalid IDs are rejected; no-ops succeed.
+    bool reorderPinnedTab(const std::string& id, const std::string& beforeID = "");
+    std::vector<std::string> pinnedTabs(const std::string& spaceID) const;
     // Names a pinned tab; a blank name goes back to the page title.
     bool renameTab(const std::string& id, const std::string& name);
     bool moveTab(const std::string& tabID, const std::string& targetSpaceID, double now);
