@@ -157,6 +157,7 @@ BrowserModel::BrowserModel() {
     }
     state.activeSpaceID = state.spaces.front().id;
     state.activeTabID = state.spaces.front().selectedTabID;
+    rememberSelection(state.activeTabID);
 }
 
 Tab* BrowserModel::tab(const std::string& id) { return findRecord(state.tabs, id); }
@@ -165,15 +166,28 @@ Space* BrowserModel::space(const std::string& id) { return findRecord(state.spac
 const Space* BrowserModel::space(const std::string& id) const { return findRecord(state.spaces, id); }
 const Session* BrowserModel::session(const std::string& id) const { return findRecord(state.sessions, id); }
 std::string BrowserModel::addTab(const std::string& spaceID, const std::string& url,
-                                 double now, const std::string& sessionID) {
-    const auto* owner = space(spaceID);
+                                 double now, const std::string& sessionID,
+                                 const std::string& originTabID, bool background) {
+    auto* owner = space(spaceID);
     if (!owner) return {};
     std::string id;
     do { id = uniqueID("tab"); } while (tab(id));
     const auto identity = sessionAllowed(id, sessionID) ? sessionID : owner->sessionID;
+    const auto origin = originTabID.empty() ? state.activeTabID : originTabID;
+    const auto source = tab(origin) ? origin : std::string{};
     state.tabs.push_back({id, owner->id, identity, "New Tab", nameOr(url, "about:blank"), false, timestamp(now)});
-    selectTab(id, now);
+    state.tabs.back().originTabID = source;
+    if (!background) selectTab(id, now);
+    else if (owner->id != state.activeSpaceID) owner->selectedTabID = id;
+    else ensureSpaceTab(spaceID, now);
     return id;
+}
+void BrowserModel::rememberSelection(const std::string& id) {
+    const auto selectedID = id;
+    recentTabIDs.erase(std::remove_if(recentTabIDs.begin(), recentTabIDs.end(), [&](const std::string& recent) {
+        return recent == selectedID || !tab(recent);
+    }), recentTabIDs.end());
+    recentTabIDs.push_back(selectedID);
 }
 bool BrowserModel::selectTab(const std::string& id, double now) {
     auto* selected = tab(id);
@@ -187,6 +201,7 @@ bool BrowserModel::selectTab(const std::string& id, double now) {
     owner->selectedTabID = selected->id;
     state.activeSpaceID = selected->spaceID;
     state.activeTabID = selected->id;
+    rememberSelection(selected->id);
     return true;
 }
 
@@ -219,7 +234,25 @@ std::string BrowserModel::ensureSpaceTab(const std::string& spaceID, double now)
     return owner->selectedTabID;
 }
 
-bool BrowserModel::closeTab(const std::string& id, double now) {
+std::string BrowserModel::tabAfterClose(const Tab& closed, const std::vector<std::string>& closingTabIDs) const {
+    const auto eligible = [&](const Tab* candidate) {
+        return candidate && candidate->spaceID == closed.spaceID && candidate->id != closed.id && !candidate->snoozed()
+            && std::find(closingTabIDs.begin(), closingTabIDs.end(), candidate->id) == closingTabIDs.end();
+    };
+    // Pinned close keeps its existing recently-used behavior, rather than following an old origin.
+    if (!closed.pinned && eligible(tab(closed.originTabID))) return closed.originTabID;
+    for (auto recent = recentTabIDs.rbegin(); recent != recentTabIDs.rend(); ++recent) {
+        if (eligible(tab(*recent))) return *recent;
+    }
+    // Tabs with no selection history (including restored layouts) use timestamps,
+    // then stable sidebar order for ties. Never wake a tab or leave this Space.
+    const Tab* next = nullptr;
+    for (const auto& candidate : state.tabs) {
+        if (eligible(&candidate) && (!next || candidate.lastUsed > next->lastUsed)) next = &candidate;
+    }
+    return next ? next->id : std::string{};
+}
+bool BrowserModel::closeTab(const std::string& id, double now, const std::vector<std::string>& closingTabIDs) {
     const auto* current = tab(id);
     if (!current) return false;
     const auto ownerID = current->spaceID;
@@ -237,23 +270,23 @@ bool BrowserModel::closeTab(const std::string& id, double now) {
         pinned->url = nameOr(pinned->pinnedURL, "about:blank");
         pinned->title = nameOr(pinned->pinnedTitle, "New Tab");
         if (!wasActive) { remember(); return true; }
-        const Tab* next = nullptr;
-        for (const auto& candidate : state.tabs) {
-            if (candidate.spaceID != ownerID || candidate.id == closedID || candidate.snoozed()) continue;
-            if (!next || candidate.lastUsed > next->lastUsed) next = &candidate;
-        }
-        if (next) selectTab(next->id, now);
-        else record.replacementID = addTab(ownerID, "about:blank", now);
-        remember();
-        return true;
+    } else {
+        state.tabs.erase(std::remove_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& candidate) {
+            return candidate.id == closedID;
+        }), state.tabs.end());
+        recentTabIDs.erase(std::remove(recentTabIDs.begin(), recentTabIDs.end(), closedID), recentTabIDs.end());
     }
-    state.tabs.erase(std::remove_if(state.tabs.begin(), state.tabs.end(), [&](const Tab& candidate) {
-        return candidate.id == closedID;
-    }), state.tabs.end());
-    const bool hadOthers = std::any_of(state.tabs.begin(), state.tabs.end(), [&](const Tab& other) { return other.spaceID == ownerID && !other.snoozed(); });
-    const auto replacement = ensureSpaceTab(ownerID, now);
-    if (!hadOthers) record.replacementID = replacement;
-    if (wasActive) selectTab(replacement, now);
+    auto* owner = space(ownerID);
+    const auto* remembered = owner ? tab(owner->selectedTabID) : nullptr;
+    if (wasActive || !remembered || remembered->spaceID != ownerID || remembered->snoozed()) {
+        auto replacement = tabAfterClose(record.tab, closingTabIDs);
+        if (replacement.empty()) {
+            replacement = addTab(ownerID, "about:blank", now, "", "", true);
+            record.replacementID = replacement;
+        }
+        if (owner) owner->selectedTabID = replacement;
+        if (wasActive) selectTab(replacement, now);
+    }
     remember();
     return true;
 }
@@ -509,6 +542,8 @@ void BrowserModel::sanitize(double now) {
 
     const auto tabIDs = repairIDs(state.tabs, "tab");
     for (auto& current : state.tabs) {
+        if (!current.originTabID.empty()) current.originTabID = remapped(tabIDs, current.originTabID);
+        if (current.originTabID == current.id || !tab(current.originTabID)) current.originTabID.clear();
         current.spaceID = remapped(spaceIDs, current.spaceID);
         const auto* owner = space(current.spaceID);
         if (!owner) {
@@ -548,6 +583,8 @@ void BrowserModel::sanitize(double now) {
         if (!space(state.activeSpaceID)) state.activeSpaceID = state.spaces.front().id;
         state.activeTabID = space(state.activeSpaceID)->selectedTabID;
     }
+    for (auto& recent : recentTabIDs) recent = remapped(tabIDs, recent);
+    rememberSelection(state.activeTabID);
 }
 bool BrowserModel::sessionAllowed(const std::string& tabID, const std::string& sessionID) const {
     if (session(sessionID) || sessionID == isolatedSessionID(tabID)) return true;

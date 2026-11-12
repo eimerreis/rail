@@ -146,6 +146,7 @@ NSString *NormalizedAddress(NSString *input) {
 - (void)saveNow;
 - (void)ensureBrowser:(const std::string &)tabID;
 - (void)closeRuntime:(const std::string &)tabID reason:(CloseReason)reason session:(const std::string &)session;
+- (void)closeModelTab:(const std::string &)tabID;
 - (std::vector<std::string>)tabsForAction:(const std::string &)tabID;
 - (void)closeTabs:(std::vector<std::string>)ids;
 - (void)moveTabs:(const std::vector<std::string> &)ids toSpace:(const std::string &)spaceID;
@@ -811,15 +812,14 @@ static NSString *SnoozeLabel(double until, BOOL full) {
 - (void)openLinkFrom:(const std::string &)source generation:(uint64_t)generation url:(NSString *)url background:(BOOL)background {
   auto runtime=_runtime.find(source); const auto *opener=_model.tab(source);
   if (_quitting || !opener || runtime==_runtime.end() || runtime->second.generation!=generation || runtime->second.closeReason!=CloseReason::None) return;
-  const std::string space=opener->spaceID,session=opener->sessionID,selected=_model.state.activeTabID;
+  const std::string space=opener->spaceID,session=opener->sessionID;
   const std::string ruled=_model.spaceForURL(C(url));
   const bool routed=!ruled.empty() && ruled!=space;
-  std::string tabID=_model.addTab(routed ? ruled : space,C(url),Now(),routed ? "" : session);
+  std::string tabID=_model.addTab(routed ? ruled : space,C(url),Now(),routed ? "" : session,source,background);
   if (tabID.empty()) return;
   if (!routed && rail::BrowserModel::isIsolatedSession(session)) _model.setIsolated(tabID);
   if (background) {
-    // addTab selects by default; restore selection before creating the hidden page.
-    _model.selectTab(selected,Now()); [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
+    [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
   } else [self selectTabID:tabID];
 }
 - (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client {
@@ -828,10 +828,10 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   const std::string ruled=url.length ? _model.spaceForURL(C(url)) : "";
   if (!ruled.empty() && ruled!=space) {
     // A rule sends the link to another Space; it opens there with that Space's session, without an opener.
-    std::string tabID=_model.addTab(ruled,C(url),Now()); if (tabID.empty()) return NO;
+    std::string tabID=_model.addTab(ruled,C(url),Now(),"",source); if (tabID.empty()) return NO;
     [self selectTabID:tabID]; [self setStatus:[NSString stringWithFormat:@"Opened in %@.",S(_model.space(ruled)->name)]]; return NO;
   }
-  std::string tabID=_model.addTab(space,url.length ? C(url) : "about:blank",Now(),session);
+  std::string tabID=_model.addTab(space,url.length ? C(url) : "about:blank",Now(),session,source);
   if (tabID.empty()) return NO;
   if (rail::BrowserModel::isIsolatedSession(session)) {
     // An isolated tab must never silently share its profile with another tab.
@@ -884,7 +884,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   CloseReason reason=it->second.closeReason; std::string nextSession=it->second.nextSession, pendingURL=it->second.pendingURL;
   const bool wasActive=tabID==_model.state.activeTabID;
   [it->second.container removeFromSuperview]; _runtime.erase(it);
-  if (reason==CloseReason::Delete || reason==CloseReason::None) _model.closeTab(tabID,Now());
+  if (reason==CloseReason::Delete || reason==CloseReason::None) [self closeModelTab:tabID];
   if (reason==CloseReason::Session) { if (nextSession=="__isolated__") _model.setIsolated(tabID); else _model.setSession(tabID,nextSession); }
   if (!pendingURL.empty()) if (auto *tab=_model.tab(tabID)) { tab->url=pendingURL; if (wasActive) _model.selectTab(tabID,Now()); }
   // Drop our context reference when its final live tab closes. Chromium may
@@ -1264,6 +1264,9 @@ static NSString *ShortAge(double time);
 - (void)closeTabs:(std::vector<std::string>)ids {
   if (ids.size()>1) { _tabSelection.clear(); _selectionAnchor.clear(); }
   std::stable_partition(ids.begin(),ids.end(),[&](const std::string &id) { return id!=_model.state.activeTabID; });
+  // CEF closes asynchronously and can finish out of order. Exclude the whole
+  // pending batch before the first close; cancellation makes a tab eligible again.
+  for (const auto &id : ids) { auto it=_runtime.find(id); if (it!=_runtime.end()) it->second.closeReason=CloseReason::Delete; }
   for (const auto &id : ids) [self closeTabID:id];
 }
 - (void)moveTabs:(const std::vector<std::string> &)ids toSpace:(const std::string &)spaceID {
@@ -1282,10 +1285,15 @@ static NSString *ShortAge(double time);
   [self setStatus:[NSString stringWithFormat:@"%@ until %@.",ids.size()==1 ? @"Snoozed" : [NSString stringWithFormat:@"%lu tabs snoozed",(unsigned long)ids.size()],SnoozeLabel(until,YES)]];
 }
 - (void)wakeTabMenu:(NSMenuItem *)sender { if (_model.wakeTab(C(sender.representedObject),Now())) { [self refresh]; [self saveSoon]; } }
+- (void)closeModelTab:(const std::string &)tabID {
+  std::vector<std::string> closing;
+  for (const auto &[id,slot]:_runtime) if (slot.closeReason==CloseReason::Delete) closing.push_back(id);
+  _model.closeTab(tabID,Now(),closing);
+}
 - (void)closeTabID:(const std::string &)tabID {
   _undoCloseArmed=YES;
   if (_runtime.count(tabID)) [self closeRuntime:tabID reason:CloseReason::Delete session:""];
-  else { _model.closeTab(tabID,Now()); [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon]; }
+  else { [self closeModelTab:tabID]; [self ensureBrowser:_model.state.activeTabID]; [self refresh]; [self saveSoon]; }
 }
 - (void)cycleRecentTabs:(NSInteger)step {
   if (_quitting) return;

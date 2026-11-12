@@ -181,6 +181,16 @@ try {
   await until('external blank tab removed', async () => !(await state()).tabs.some(t => t.id === otherSpaceBlank.id));
   passed('unmatched external links still open new tabs or reuse the selected blank tab');
   await command('select', { tab: workA.id });
+  s = await command('shortcut', { key: 't' });
+  const blankChild = s.activeTab;
+  assert.notEqual(blankChild, workA.id);
+  assert.equal(s.tabs.find(t => t.id === blankChild).url, 'about:blank');
+  await command('select', { tab: workB.id });
+  await command('select', { tab: blankChild });
+  s = await command('shortcut', { key: 'w' });
+  assert.equal(s.activeTab, workA.id);
+  assert.ok(!s.tabs.some(t => t.id === blankChild));
+  passed('native CMD+T/CMD+W returns to the source rather than a newer selection or the first tab');
   const isolatedA = await newTab('/isolated-a', { isolated: true });
   assert.equal(await evaluate(isolatedA.url, 'document.cookie'), '');
   await evaluate(isolatedA.url, `document.cookie='identity=isolated-a; Path=/; Max-Age=86400'`);
@@ -212,17 +222,22 @@ try {
       assert.equal(opened.session, 'work');
       assert.equal(await evaluate(destination, 'document.cookie'), 'identity=work');
     }
-    await command('close', { tab: opened.id });
+    await command('select', { tab: workB.id });
+    await command('select', { tab: opened.id });
+    await command('shortcut', { key: 'w' });
     await until(`closed ${name}`, async () => !(await state()).tabs.some(t => t.id === opened.id));
-    passed(`${name} opens a new tab with the expected selection and session`);
+    assert.equal((await state()).activeTab, source.id);
+    passed(`${name} keeps its selection and session, then closes back to its source`);
   }
   await command('select', { tab: workA.id });
   await evaluate(workA.url, `void window.open(${JSON.stringify(origin + '/popup-work')})`);
   await target(origin + '/popup-work');
   const popupWork = (await state()).activeTab;
   assert.equal(await evaluate(origin + '/popup-work', 'document.cookie'), 'identity=work');
+  assert.equal(await evaluate(origin + '/popup-work', 'window.opener !== null'), true);
   await evaluate(origin + '/popup-work', 'void window.close()');
   await until('script popup closes', async () => !(await state()).tabs.some(t => t.id === popupWork));
+  assert.equal((await state()).activeTab, workA.id);
   passed('named-session popups share login and window.close removes their tab');
   await command('select', { tab: isolatedA.id });
   await evaluate(isolatedA.url, `void window.open(${JSON.stringify(origin + '/popup-isolated')})`);
@@ -232,6 +247,7 @@ try {
   assert.notEqual((await state()).tabs.find(t => t.id === popupIsolated).session, (await state()).tabs.find(t => t.id === isolatedA.id).session);
   await command('close', { tab: popupIsolated });
   await until('isolated popup closes', async () => !(await state()).tabs.some(t => t.id === popupIsolated));
+  assert.equal((await state()).activeTab, isolatedA.id);
   passed('popups from isolated tabs receive separate profiles');
   await command('select', { tab: isolatedB.id });
   await command('age', { tab: isolatedB.id });
