@@ -1,5 +1,14 @@
 # rail
 
+## 0.5.3
+
+### Patch Changes
+
+- 2b1ee54: Choose Google, Bing or DuckDuckGo in Settings → Search for address-bar and new-tab searches. Rail remembers the choice across restarts and keeps the existing DuckDuckGo default until you change it.
+- b587b82: Closing a tab now returns to the tab that opened it when it is still available in the same Space, with a reliable recently-used fallback. Background tabs keep their source without interrupting the current page; pinned tabs, undo, and closing multiple tabs keep their existing behavior.
+- 40afe08: Reorder pinned tabs by dragging them within Pinned. An insertion line shows the new position, and each Space remembers its pinned order across restarts.
+- f404789: Keep newly opened background tabs from starting media before they are first shown, including links opened with middle-click, Command-click or the context menu. Existing playback can continue when switching tabs or Spaces.
+
 ## 0.5.2
 
 ### Patch Changes
