@@ -12,6 +12,8 @@
 #import "SettingsWindow.h"
 #import "PasswordService.h"
 #import "PasswordPalette.h"
+#import "AddressInput.h"
+#include "SearchEngine.h"
 #include "include/cef_process_message.h"
 #include <set>
 #include "include/cef_request_context.h"
@@ -97,45 +99,6 @@ NSString *AddressSymbol(const std::string &url) {
   if ([scheme isEqualToString:@"http"]) return @"exclamationmark.triangle";
   if ([scheme isEqualToString:@"file"]) return @"doc";
   return @"magnifyingglass";
-}
-// File addresses are often pasted with raw spaces; escape those and keep any existing escapes.
-NSString *FileAddress(NSString *text) {
-  NSMutableCharacterSet *allowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
-  [allowed addCharactersInString:@"%?#"];
-  NSString *escaped = [text stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-  NSURLComponents *parts = escaped ? [NSURLComponents componentsWithString:escaped] : nil;
-  NSString *address = [parts.path hasPrefix:@"/"] ? parts.URL.absoluteString : nil;
-  return address && RailIsFileURL(C(address)) ? address : nil;
-}
-// "/a/b" and "~/a/b" name files literally, so "%", "?" and "#" are part of the name. No file
-// system access: this runs on every keystroke, and touching a protected folder prompts.
-NSString *PathAddress(NSString *text) {
-  BOOL home = [text isEqualToString:@"~"] || [text hasPrefix:@"~/"];
-  if (!home && ![text hasPrefix:@"/"]) return nil;
-  NSString *path = home ? [NSHomeDirectory() stringByAppendingString:[text substringFromIndex:1]] : text;
-  NSString *escaped = [path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet];
-  return escaped ? [@"file://" stringByAppendingString:escaped] : nil;
-}
-NSString *NormalizedAddress(NSString *input) {
-  NSString *text = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-  if (!text.length) return nil;
-  if ([text isEqualToString:@"about:blank"]) return text;
-  if ([text.lowercaseString hasPrefix:@"file:"]) return FileAddress(text);
-  if (NSString *path = PathAddress(text)) return path;
-  if ([text rangeOfString:@"://"].location != NSNotFound) {
-    NSURLComponents *parts = [NSURLComponents componentsWithString:text];
-    return ([@[@"http",@"https"] containsObject:parts.scheme.lowercaseString] && parts.host.length) ? parts.URL.absoluteString : nil;
-  }
-  if ([text hasPrefix:@"javascript:"] || [text hasPrefix:@"data:"]) return nil;
-  BOOL noSpaces = [text rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location == NSNotFound;
-  if (noSpaces && ([text containsString:@"."] || [text hasPrefix:@"localhost"] || [text hasPrefix:@"[::1]"])) {
-    BOOL local = [text hasPrefix:@"localhost"] || [text hasPrefix:@"127."] || [text hasPrefix:@"[::1]"];
-    NSURLComponents *parts = [NSURLComponents componentsWithString:[(local ? @"http://" : @"https://") stringByAppendingString:text]];
-    return parts.host.length ? parts.URL.absoluteString : nil;
-  }
-  NSURLComponents *search = [NSURLComponents componentsWithString:@"https://duckduckgo.com/"];
-  search.queryItems = @[[NSURLQueryItem queryItemWithName:@"q" value:text]];
-  return search.URL.absoluteString;
 }
 }
 
@@ -1391,6 +1354,7 @@ static NSString *ShortAge(double time);
   NSString *query=[typed stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
   if (!query.length) { [self hideSuggestions]; return; }
   auto matches=_history.suggest(C(query),Now(),6);
+  BOOL search=NO; NSString *normalized=rail::NormalizedAddress(query,_model.state.searchEngine,&search);
   NSMutableArray<RailSuggestion *> *items=[NSMutableArray array];
   auto addRow=[&](const std::string &url, NSString *text, NSString *title, NSString *detail, NSImage *icon) {
     for (const auto &row : _addressRows) if (row.url==url) return;
@@ -1407,9 +1371,9 @@ static NSString *ShortAge(double time);
     addRow(match.url,completed,page ? S(match.entry->title) : S(rail::History::displayURL(match.url)),page ? S(rail::History::displayURL(match.url)) : nil,nil);
     [self showInlineCompletion:completed typedLength:typed.length];
     first=1;
-  } else if (NSString *url=NormalizedAddress(query)) {
-    BOOL search=[url hasPrefix:@"https://duckduckgo.com/?"] && ![query.lowercaseString containsString:@"duckduckgo"];
-    addRow(C(url),typed,search ? query : S(rail::History::displayURL(C(url))),search ? @"Search DuckDuckGo" : nil,search ? RailSymbol(@"magnifyingglass",13) : nil);
+  } else if (normalized) {
+    NSString *detail=search ? [NSString stringWithFormat:@"Search %@",@(rail::searchEngineForID(_model.state.searchEngine).name)] : nil;
+    addRow(C(normalized),typed,search ? query : S(rail::History::displayURL(C(normalized))),detail,search ? RailSymbol(@"magnifyingglass",13) : nil);
   }
   for (size_t i=first;i<matches.size() && items.count<6;i++) {
     const auto *entry=matches[i].entry; NSString *display=S(rail::History::displayURL(entry->url));
@@ -1460,7 +1424,7 @@ static NSString *ShortAge(double time);
 }
 - (void)addressEntered:(id)sender { (void)sender; [self navigateTo:_address.stringValue]; }
 - (void)navigateTo:(NSString *)address {
-  NSString *url=NormalizedAddress(address); if (!url) { [self setStatus:@"Enter a web address or a search. Supported addresses use http, https or file."]; return; }
+  NSString *url=rail::NormalizedAddress(address,_model.state.searchEngine); if (!url) { [self setStatus:@"Enter a web address or a search. Supported addresses use http, https or file."]; return; }
   if (_homeVisible || _readingVisible) {
     // Typing on the Space home or in Reading opens a new tab instead of replacing the last page.
     _homeVisible=NO; _readingVisible=NO; auto id=_model.addTab(_model.state.activeSpaceID,"about:blank",Now()); _model.selectTab(id,Now());
@@ -1865,6 +1829,11 @@ static NSString *ShortAge(double time);
 - (void)settingsChanged { RailSetTheme(S(_model.state.theme)); [self refresh]; [self layout]; [self saveSoon]; [self checkIdle]; }
 - (void)settingsProjectsChanged { [self projectsChanged]; [self refreshHome]; }
 - (void)settingsSetDevToolsDocked:(BOOL)docked { if (_model.state.devToolsDocked!=(bool)docked) [self toggleDevToolsDock:nil]; }
+- (void)settingsSetSearchEngine:(const std::string &)engineID {
+  _model.state.searchEngine=rail::searchEngineForID(engineID).id;
+  // Suggestions capture a destination; never keep one from the previous engine.
+  [self hideSuggestions]; [self settingsChanged];
+}
 - (void)settingsSignIn:(const std::string &)connectionID { [self signInConnection:connectionID]; }
 - (void)settingsShowSpaceHome:(const std::string &)spaceID {
   if (_model.state.activeSpaceID!=spaceID) { _model.selectSpace(spaceID,Now()); [self ensureBrowser:_model.state.activeTabID]; }
@@ -2617,7 +2586,10 @@ static NSString *ShortAge(double time) {
   NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=title; alert.informativeText=info ?: @""; [alert addButtonWithTitle:@"OK"];
   [alert beginSheetModalForWindow:_window completionHandler:nil];
 }
-- (NSString *)addressFromInput:(NSString *)input { NSString *url=NormalizedAddress(input); return url && ![url hasPrefix:@"https://duckduckgo.com/?"] && !RailIsFileURL(C(url)) ? url : nil; }
+- (NSString *)addressFromInput:(NSString *)input {
+  BOOL search=NO; NSString *url=rail::NormalizedAddress(input,_model.state.searchEngine,&search);
+  return url && !search && !RailIsFileURL(C(url)) ? url : nil;
+}
 - (void)newProject:(id)sender {
   (void)sender; const auto *active=_model.tab(_model.state.activeTabID);
   std::string url=active && rail::recognizeRepo(active->url) ? rail::recognizeRepo(active->url).repoURL() : "";

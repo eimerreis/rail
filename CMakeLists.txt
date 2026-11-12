@@ -28,6 +28,9 @@ if(BUILD_TESTING)
   add_executable(BrowserModelTests tests/BrowserModelTests.cpp)
   target_link_libraries(BrowserModelTests PRIVATE BrowserModel)
   add_test(NAME BrowserModelTests COMMAND BrowserModelTests)
+  add_executable(SearchEngineTests tests/SearchEngineTests.cpp)
+  target_link_libraries(SearchEngineTests PRIVATE BrowserModel)
+  add_test(NAME SearchEngineTests COMMAND SearchEngineTests)
   add_executable(HistoryTests tests/HistoryTests.cpp)
   target_link_libraries(HistoryTests PRIVATE BrowserModel)
   add_test(NAME HistoryTests COMMAND HistoryTests)
@@ -51,6 +54,14 @@ if(BUILD_TESTING)
       OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON OBJCXX_EXTENSIONS OFF
     )
     add_test(NAME StateStoreTests COMMAND StateStoreTests)
+    add_executable(AddressInputTests tests/AddressInputTests.mm src/AddressInput.mm)
+    target_include_directories(AddressInputTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_options(AddressInputTests PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    target_link_libraries(AddressInputTests PRIVATE "-framework Foundation")
+    set_target_properties(AddressInputTests PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON OBJCXX_EXTENSIONS OFF
+    )
+    add_test(NAME AddressInputTests COMMAND AddressInputTests)
     add_executable(FeedParserTests tests/FeedParserTests.mm src/FeedParser.mm src/StateStore.mm)
     target_compile_options(FeedParserTests PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
     target_link_libraries(FeedParserTests PRIVATE BrowserModel "-framework Foundation")
@@ -135,6 +146,7 @@ add_executable(Rail MACOSX_BUNDLE
   src/AppUpdater.mm
   src/ReleaseUpdater.mm
   src/BrowserController.mm
+  src/AddressInput.mm
   src/CEFBridge.mm
   src/NativeViews.mm
   src/Theme.mm

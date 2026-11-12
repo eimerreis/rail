@@ -14,6 +14,7 @@
 - (void)settingsChanged;
 - (void)settingsProjectsChanged;
 - (void)settingsSetDevToolsDocked:(BOOL)docked;
+- (void)settingsSetSearchEngine:(const std::string &)engineID;
 - (void)makeDefaultBrowser:(id)sender;
 - (void)settingsSignIn:(const std::string &)connectionID;
 - (void)showPasswords:(id)sender;

@@ -39,6 +39,7 @@ Rail uses its own **Rail Safe Storage** Keychain entry for Chromium's cookie enc
 | Hide/show sidebar and Spaces rail | **⌘ S**; choose Off, Subtle or Full animation in Settings → Appearance |
 | Change the theme | Settings → Appearance → Theme: Porcelain, Nightline or Daylight. Applies to every Rail window at once and is remembered; web pages keep their own colours |
 | Address or search | **⌘ L** |
+| Choose a search engine | Settings → Search → Search engine: DuckDuckGo, Google or Bing. Applies to the address bar and new tabs in every Space; DuckDuckGo remains the default for existing and new profiles |
 | New / close tab | **⌘ T** / **⌘ W** |
 | Open a link in a background tab | **Middle-click** or **⌘ click**; hold **Shift** to select the new tab |
 | Reopen closed tab | **⌘ Z** right after closing, or **⇧ ⌘ T** any time |
@@ -67,7 +68,7 @@ Rail uses its own **Rail Safe Storage** Keychain entry for Chromium's cookie enc
 | Switch / add Spaces | Icons / plus in the left rail |
 | Rename Space, change its icon or default session | Settings → Spaces, or the ellipsis beside the Space name |
 | Send matching links to a Space | Settings → Spaces → Links that open here (also Space ellipsis → Open Links in This Space); test an address under Test a link |
-| Open Settings (appearance, tabs, DevTools, Spaces, sessions, projects, connections) | Settings button in the rail or **⌘ ,** |
+| Open Settings (appearance, search, tabs, DevTools, Spaces, sessions, projects, connections) | Settings button in the rail or **⌘ ,** |
 | Show the Space's projects | **Projects** at the top of the sidebar, or **⌘ ⇧ H** |
 | Show your own pull requests and their checks | **Activity** in the sidebar, or **⌘ ⇧ A** |
 | Follow your own pull requests and the pipelines you started | The Checks capsule in the toolbar, or **⌘ ⇧ K** for its list |

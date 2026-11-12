@@ -1,6 +1,7 @@
 #import "SettingsWindow.h"
 #import "NativeViews.h"
 #import "Theme.h"
+#include "SearchEngine.h"
 #include <algorithm>
 #include <cmath>
 
@@ -14,6 +15,7 @@ struct Category { NSString *pane, *title, *symbol, *keywords; unsigned int tile;
 const std::vector<Category> &Categories() {
   static const std::vector<Category> list = {
     {@"appearance",@"Appearance",@"sidebar.left",@"theme porcelain nightline daylight dark light color colour interface size sidebar animation motion scale small normal large",0x587089,false},
+    {@"search",@"Search",@"magnifyingglass",@"search engine google bing duckduckgo address query default",0x4173aa,false},
     {@"tabs",@"Tabs",@"square.stack",@"idle unload sleep asleep memory minutes reopen",0x4173aa,false},
     {@"developer",@"Developer",@"wrench.and.screwdriver",@"devtools inspector dock docked window inspect",0x2d3b4d,false},
     {@"browser",@"Default Browser",@"safari",@"default links other apps downloads",0x3f7d84,true},
@@ -273,7 +275,7 @@ NSString *ThemeDetail(NSString *themeID) {
   if (_focusAfterReload) { [_window makeFirstResponder:_focusAfterReload]; [_focusAfterReload selectText:nil]; [_focusAfterReload scrollRectToVisible:_focusAfterReload.bounds]; }
 }
 
-#pragma mark Appearance, Tabs, Developer, Default Browser
+#pragma mark Appearance, Search, Tabs, Developer, Default Browser
 
 - (void)buildAppearance {
   rail::BrowserModel &model = [_host settingsModel]; __weak SettingsWindowController *weak = self;
@@ -296,6 +298,21 @@ NSString *ThemeDetail(NSString *themeID) {
       SettingsWindowController *strong = weak; if (!strong) return; [strong->_host settingsModel].state.sidebarAnimation = C(styles[index]); [strong changed]; }]];
   [self endBox];
   if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) [self note:@"Reduce motion is on in macOS, so the sidebar doesn't animate whatever you choose here." symbol:@"info.circle"];
+}
+- (void)buildSearch {
+  rail::BrowserModel &model = [_host settingsModel]; __weak SettingsWindowController *weak = self;
+  [self intro:@"Choose the engine for searches typed in the address bar, including new tabs and Space home. Website addresses still open directly."];
+  [self beginBox];
+  NSPopUpButton *engine = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,150,26) pullsDown:NO];
+  engine.accessibilityLabel = @"Search engine";
+  for (const auto &option : rail::SearchEngines) {
+    [engine addItemWithTitle:@(option.name)]; engine.lastItem.representedObject = @(option.id);
+    if (model.state.searchEngine == option.id) [engine selectItem:engine.lastItem];
+  }
+  [self bind:engine to:^(NSPopUpButton *sender) { SettingsWindowController *strong = weak; if (!strong) return;
+    [strong->_host settingsSetSearchEngine:C(sender.selectedItem.representedObject)]; [strong reloadSoon]; }];
+  [self row:@"Search engine" detail:@"Applies to new searches in every Space. Existing tabs and saved searches stay as they are." control:engine];
+  [self endBox];
 }
 - (void)buildTabs {
   rail::BrowserModel &model = [_host settingsModel]; __weak SettingsWindowController *weak = self;

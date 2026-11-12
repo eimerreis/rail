@@ -75,8 +75,28 @@ int main() {
         Check(loaded.state.theme == "porcelain", "missing or unknown theme should fall back to Porcelain");
         Check(loaded.state.activeTabID == "t1" && loaded.tab("t1") && loaded.tab("t1")->url == "https://example.com/kept" && loaded.state.idleMinutes == 30 && loaded.state.sidebarWidth == 300 && loaded.state.controlSize == "large", "theme fallback lost other state");
       }
+      for (const char *engine : {"duckduckgo", "google", "bing"}) {
+        rail::BrowserModel searching = original; searching.state.searchEngine = engine;
+        Check(rail::SaveState(directory,searching,&error), "search engine save failed");
+        rail::BrowserModel loaded;
+        Check(rail::LoadState(directory,loaded,&error) && loaded.state.searchEngine == engine, "search engine lost");
+        Check(loaded.state.activeTabID == tabID && loaded.tab(tabID)->url == original.tab(tabID)->url && loaded.tab(tabID)->sessionID == original.tab(tabID)->sessionID, "search engine round-trip changed the layout");
+      }
+      for (id stored in @[@"missing", @"", @"unknown", @42, @YES, NSNull.null, @[], @{}]) {
+        Check(rail::SaveState(directory,original,&error), "search fallback fixture save failed");
+        NSMutableDictionary *saved = [[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:path] options:0 error:nil] mutableCopy];
+        if ([stored isEqual:@"missing"]) [saved removeObjectForKey:@"searchEngine"]; else saved[@"searchEngine"] = stored;
+        [[NSJSONSerialization dataWithJSONObject:saved options:0 error:nil] writeToFile:path atomically:YES];
+        rail::BrowserModel loaded; loaded.state.searchEngine = "google";
+        Check(rail::LoadState(directory,loaded,&error), "invalid search preferences should not reject a layout");
+        Check(loaded.state.searchEngine == "duckduckgo", "missing or invalid engine should retain the pre-preference default");
+        Check(loaded.state.tabs.size() == original.state.tabs.size() && loaded.state.activeTabID == tabID && loaded.tab(tabID)->url == original.tab(tabID)->url
+              && loaded.tab(tabID)->pinnedURL == original.tab(tabID)->pinnedURL && loaded.tab(tabID)->customTitle == "My notes"
+              && loaded.tab(tabID)->sessionID == original.tab(tabID)->sessionID && loaded.spaceForURL("https://dev.azure.com/contoso/x") == "personal"
+              && loaded.state.sidebarWidth == 300 && loaded.state.idleMinutes == 30, "search fallback lost saved tabs, pins, sessions, rules or preferences");
+      }
       Check(rail::SaveState(directory,original,&error), "save failed");
-      std::cout << "PASS state round-trip, Unicode, preferences, Space rules, corruption, future schema, theme persistence and fallback\n";
+      std::cout << "PASS state round-trip, Unicode, preferences, Space rules, corruption, future schema, theme and search engine persistence and fallback\n";
       rail::Projects projects;
       auto projectID = projects.addProject("Billing — 請求", "work", "https://dev.azure.com/contoso/Billing/_git/billing-api", "work");
       auto envID = projects.addEnvironment(projectID, "PROD", "https://billing.contoso.com", "__isolated__", "/healthz");

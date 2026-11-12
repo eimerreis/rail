@@ -65,6 +65,8 @@ struct State {
     std::string sidebarAnimation = "full";
     // Shell theme for every window: porcelain, nightline or daylight.
     std::string theme = "porcelain";
+    // Address-bar and new-tab searches: duckduckgo (the existing default), google or bing.
+    std::string searchEngine = "duckduckgo";
     // DevTools open beside the page, as in Chrome, or in their own window.
     bool devToolsDocked = true;
     double devToolsWidth = 480;
