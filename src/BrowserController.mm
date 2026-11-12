@@ -15,6 +15,7 @@
 #import "AddressInput.h"
 #include "SearchEngine.h"
 #include "PinnedTabLayout.h"
+#include "PagePresentation.h"
 #include "include/cef_process_message.h"
 #include <set>
 #include "include/cef_request_context.h"
@@ -37,6 +38,8 @@ struct RuntimeTab {
   std::string pendingURL;
   std::string error;
   bool loading = false, back = false, forward = false;
+  // One-shot visibility gate for this browser generation, not persisted with the tab.
+  rail::PagePresentation presentation;
   // Find state is transient and private to this live tab, including isolated tabs.
   std::string findText;
   bool findVisible = false, findPending = false;
@@ -109,6 +112,7 @@ NSString *AddressSymbol(const std::string &url) {
 - (void)saveSoon;
 - (void)saveNow;
 - (void)ensureBrowser:(const std::string &)tabID;
+- (void)presentRuntime:(RuntimeTab &)slot tab:(const std::string &)tabID;
 - (void)closeRuntime:(const std::string &)tabID reason:(CloseReason)reason session:(const std::string &)session;
 - (void)closeModelTab:(const std::string &)tabID;
 - (std::vector<std::string>)tabsForAction:(const std::string &)tabID;
@@ -671,7 +675,7 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   const BOOL covered=_homeVisible || _readingVisible;
   _back.enabled=!covered && slot!=_runtime.end() && slot->second.back; _forward.enabled=!covered && slot!=_runtime.end() && slot->second.forward;
   if (!covered && slot!=_runtime.end() && slot->second.loading) [_progress startAnimation:nil]; else [_progress stopAnimation:nil];
-  for (auto &[id,runtime] : _runtime) { runtime.container.hidden = covered || id != _model.state.activeTabID; [self placeDevTools:runtime]; }
+  for (auto &[id,runtime] : _runtime) { [self presentRuntime:runtime tab:id]; [self placeDevTools:runtime]; }
   BOOL error = slot!=_runtime.end() && !slot->second.error.empty();
   _empty.hidden = covered || (active && active->url!="about:blank" && !error);
   _home.hidden = !_homeVisible || _homePage != 0; _activity.hidden = !_homeVisible || _homePage != 1; if (_homeVisible) [self refreshHome];
@@ -762,14 +766,35 @@ static NSString *SnoozeLabel(double until, BOOL full) {
 }
 - (RuntimeTab &)makeRuntime:(const std::string &)tabID {
   RuntimeTab slot; slot.generation=_nextGeneration++; slot.container=[[NSView alloc] initWithFrame:_webHost.bounds];
-  slot.container.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable; slot.container.hidden=tabID!=_model.state.activeTabID;
+  // Keep the entire native hierarchy hidden while CEF asynchronously creates it.
+  slot.container.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable; slot.container.hidden=YES;
   [_webHost addSubview:slot.container]; auto result=_runtime.emplace(tabID,std::move(slot)); return result.first->second;
+}
+- (void)presentRuntime:(RuntimeTab &)slot tab:(const std::string &)tabID {
+  const bool selected=_model.pageSelected(tabID,_homeVisible || _readingVisible);
+  // Do not grant first presentation while closing or count selection during creation as activation.
+  const bool visible=slot.presentation.update(selected,slot.browser.get()!=nullptr,slot.closeReason!=CloseReason::None || _quitting);
+  if (slot.browser) {
+    NSView *view=(__bridge NSView *)slot.browser->GetHost()->GetWindowHandle();
+    view.hidden=slot.presentation.initiallyHidden();
+  }
+  // After first presentation, leave playback to Chromium. In particular, do not
+  // mute, pause or freeze pages when switching tabs or Spaces.
+  slot.container.hidden=!visible;
+  if (slot.browser) {
+    NSView *view=(__bridge NSView *)slot.browser->GetHost()->GetWindowHandle();
+    // GetWindowHandle is CEF's plain wrapper, not Chromium's WebContents view.
+    // Explicitly hide its native children: hiding only an ancestor does not
+    // reliably deliver Chromium's viewDidHide/Unhide visibility notification.
+    // Unhide parents first so viewDidUnhide observes an actually visible page.
+    for (NSView *content in view.subviews) content.hidden=slot.presentation.initiallyHidden();
+  }
 }
 - (void)ensureBrowser:(const std::string &)tabID {
   auto *tab=_model.tab(tabID); if (!tab || _quitting || tab->url=="about:blank") return;
   if (_runtime.count(tabID)) return;
   CefRefPtr<CefRequestContext> context=[self contextForSession:tab->sessionID]; if (!context) { [self setStatus:@"Invalid session. Select a named session to recover."]; return; }
-  auto &slot=[self makeRuntime:tabID]; CefWindowInfo info; info.SetAsChild((__bridge CefWindowHandle)slot.container,CefRect(0,0,(int)_webHost.bounds.size.width,(int)_webHost.bounds.size.height)); info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
+  auto &slot=[self makeRuntime:tabID]; CefWindowInfo info; info.SetAsChild((__bridge CefWindowHandle)slot.container,CefRect(0,0,(int)_webHost.bounds.size.width,(int)_webHost.bounds.size.height)); info.runtime_style=CEF_RUNTIME_STYLE_ALLOY; info.hidden=true;
   CefBrowserSettings settings; settings.background_color=CefColorSetARGB(255,255,255,255);
   CefRefPtr<CefClient> client=MakeRailClient(self,tabID,slot.generation);
   if (!CefBrowserHost::CreateBrowser(info,client,tab->url,settings,nullptr,context)) {
@@ -789,27 +814,32 @@ static NSString *SnoozeLabel(double until, BOOL full) {
     [self ensureBrowser:tabID]; [self refresh]; [self saveSoon];
   } else [self selectTabID:tabID];
 }
-- (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client {
-  const auto *opener=_model.tab(source); if (!opener || _quitting) return NO;
+- (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url background:(BOOL)background windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client {
+  const auto *opener=_model.tab(source); auto runtime=_runtime.find(source);
+  if (!opener || _quitting || runtime==_runtime.end() || runtime->second.generation!=generation || runtime->second.closeReason!=CloseReason::None) return NO;
   const std::string space=opener->spaceID,session=opener->sessionID;
   const std::string ruled=url.length ? _model.spaceForURL(C(url)) : "";
   if (!ruled.empty() && ruled!=space) {
     // A rule sends the link to another Space; it opens there with that Space's session, without an opener.
-    std::string tabID=_model.addTab(ruled,C(url),Now(),"",source); if (tabID.empty()) return NO;
-    [self selectTabID:tabID]; [self setStatus:[NSString stringWithFormat:@"Opened in %@.",S(_model.space(ruled)->name)]]; return NO;
+    std::string tabID=_model.addTab(ruled,C(url),Now(),"",source,background); if (tabID.empty()) return NO;
+    if (background) { [self ensureBrowser:tabID]; [self refresh]; [self saveSoon]; }
+    else [self selectTabID:tabID];
+    [self setStatus:[NSString stringWithFormat:@"Opened in %@.",S(_model.space(ruled)->name)]]; return NO;
   }
-  std::string tabID=_model.addTab(space,url.length ? C(url) : "about:blank",Now(),session,source);
+  std::string tabID=_model.addTab(space,url.length ? C(url) : "about:blank",Now(),session,source,background);
   if (tabID.empty()) return NO;
   if (rail::BrowserModel::isIsolatedSession(session)) {
     // An isolated tab must never silently share its profile with another tab.
     // Cancel the inherited-context popup and navigate in a fresh isolated tab.
-    _model.setIsolated(tabID); [self selectTabID:tabID];
+    _model.setIsolated(tabID);
+    if (background) { [self ensureBrowser:tabID]; [self refresh]; [self saveSoon]; }
+    else [self selectTabID:tabID];
     [self setStatus:@"Opened in a separate isolated session."]; return NO;
   }
   // Named-session popups retain Chromium's window.opener behavior for login flows.
-  _model.selectTab(tabID,Now()); auto &slot=[self makeRuntime:tabID];
+  auto &slot=[self makeRuntime:tabID];
   _pendingPopups.emplace(PopupKey(source,generation,popupID),tabID);
-  info.SetAsChild((__bridge CefWindowHandle)slot.container,CefRect(0,0,(int)_webHost.bounds.size.width,(int)_webHost.bounds.size.height)); info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
+  info.SetAsChild((__bridge CefWindowHandle)slot.container,CefRect(0,0,(int)_webHost.bounds.size.width,(int)_webHost.bounds.size.height)); info.runtime_style=CEF_RUNTIME_STYLE_ALLOY; info.hidden=true;
   client=MakeRailClient(self,tabID,slot.generation); [self refresh]; [self saveSoon]; return YES;
 }
 - (void)popupAbortedFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID {
@@ -817,18 +847,30 @@ static NSString *SnoozeLabel(double until, BOOL full) {
   std::string tabID=pending->second; _pendingPopups.erase(pending);
   auto slot=_runtime.find(tabID); if (slot!=_runtime.end() && !slot->second.browser) [self browserClosed:tabID generation:slot->second.generation];
 }
-- (BOOL)pageIsCovered { return _homeVisible || _readingVisible; }
+- (BOOL)canFocusTab:(const std::string &)tabID generation:(uint64_t)generation {
+  auto it=_runtime.find(tabID);
+  return !_quitting && it!=_runtime.end() && it->second.generation==generation
+    && it->second.closeReason==CloseReason::None && _model.pageSelected(tabID,_homeVisible || _readingVisible);
+}
 - (void)browserCreated:(CefRefPtr<CefBrowser>)browser tab:(const std::string &)tabID generation:(uint64_t)generation {
   auto it=_runtime.find(tabID);
   if (it==_runtime.end() || it->second.generation!=generation) { browser->GetHost()->CloseBrowser(true); return; }
   it->second.browser=browser;
   for (auto pending=_pendingPopups.begin();pending!=_pendingPopups.end();) { if (pending->second==tabID) pending=_pendingPopups.erase(pending); else ++pending; }
   NSView *view=(__bridge NSView *)browser->GetHost()->GetWindowHandle(); view.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
+  // CEF's windowed Mac delegate creates WebContents with initially_hidden=false.
+  // Chromium ignores hide notifications until its first real visible transition.
+  // Prime that transition on the EMPTY host, before CEF's initial navigation or
+  // a popup's opener script, then apply the actual selection synchronously.
+  // No page has been presented and no event-loop/paint turn is allowed here.
+  view.hidden=NO; it->second.container.hidden=NO;
+  for (NSView *content in view.subviews) { content.hidden=YES; content.hidden=NO; }
+  [self presentRuntime:it->second tab:tabID];
   if (it->second.closeReason!=CloseReason::None || _quitting) browser->GetHost()->CloseBrowser(_quitting);
   else {
     if (!it->second.pendingURL.empty()) { browser->GetMainFrame()->LoadURL(it->second.pendingURL); it->second.pendingURL.clear(); }
     // A page that finishes starting behind Reading or Home must not take the keyboard from them.
-    if (tabID==_model.state.activeTabID && !_homeVisible && !_readingVisible) browser->GetHost()->SetFocus(true);
+    if ([self canFocusTab:tabID generation:generation]) browser->GetHost()->SetFocus(true);
   }
   [self refresh];
 }
@@ -2853,6 +2895,9 @@ static NSString *ShortAge(double time) {
     std::string tabID=[command[@"tab"] isKindOfClass:NSString.class] ? C(command[@"tab"]) : _model.state.activeTabID;
     if ([action isEqual:@"newTab"]) { auto id=_model.addTab(_model.state.activeSpaceID,C(command[@"url"] ?: @"about:blank"),Now(),C(command[@"session"] ?: @"")); if ([command[@"isolated"] boolValue]) _model.setIsolated(id); [self selectTabID:id]; }
     else if ([action isEqual:@"select"]) [self selectTabID:tabID];
+    else if ([action isEqual:@"backgroundLink"]) { auto it=_runtime.find(tabID); if (it!=_runtime.end()) [self openLinkFrom:tabID generation:it->second.generation url:command[@"url"] background:YES]; }
+    else if ([action isEqual:@"space"]) { if (_model.selectSpace(C(command[@"space"]),Now())) { _homeVisible=NO; _readingVisible=NO; [self ensureBrowser:_model.state.activeTabID]; [self refresh]; } }
+    else if ([action isEqual:@"spaceRules"]) { _model.setSpaceRules(C(command[@"space"]),{C(command[@"pattern"])}); }
     else if ([action isEqual:@"navigate"]) [self navigateTo:command[@"url"]];
     else if ([action isEqual:@"externalURL"]) {
       NSArray *values=[command[@"urls"] isKindOfClass:NSArray.class] ? command[@"urls"] : @[command[@"url"] ?: @""];
@@ -3031,7 +3076,7 @@ static NSString *ShortAge(double time) {
   NSWindow *keyWindow=NSApp.keyWindow;
   NSDictionary *windowState=@{@"main":@(keyWindow==_window),@"closable":@((keyWindow.styleMask & NSWindowStyleMaskClosable)!=0),@"closeEnabled":@([keyWindow standardWindowButton:NSWindowCloseButton].enabled)};
   NSMutableArray *tabs=[NSMutableArray array];
-  for (const auto &tab:_model.state.tabs) { auto it=_runtime.find(tab.id); [tabs addObject:@{@"id":S(tab.id),@"url":S(tab.url),@"title":S(tab.title),@"session":S(tab.sessionID),@"space":S(tab.spaceID),@"pinned":@(tab.pinned),@"loaded":@(it!=_runtime.end() && it->second.browser.get()!=nullptr),@"closing":@(it!=_runtime.end() && it->second.closeReason!=CloseReason::None),@"error":it!=_runtime.end() ? S(it->second.error) : @""}]; }
+  for (const auto &tab:_model.state.tabs) { auto it=_runtime.find(tab.id); [tabs addObject:@{@"id":S(tab.id),@"url":S(tab.url),@"title":S(tab.title),@"session":S(tab.sessionID),@"space":S(tab.spaceID),@"pinned":@(tab.pinned),@"loaded":@(it!=_runtime.end() && it->second.browser.get()!=nullptr),@"initialMediaHeld":@(it!=_runtime.end() && it->second.presentation.initiallyHidden()),@"closing":@(it!=_runtime.end() && it->second.closeReason!=CloseReason::None),@"error":it!=_runtime.end() ? S(it->second.error) : @""}]; }
   NSMutableArray *projects=[NSMutableArray array]; const auto &status=[_status snapshot];
   for (const auto &p : _projects.state.projects) {
     NSMutableArray *environments=[NSMutableArray array];

@@ -190,6 +190,12 @@ void BrowserModel::rememberSelection(const std::string& id) {
     }), recentTabIDs.end());
     recentTabIDs.push_back(selectedID);
 }
+bool BrowserModel::pageSelected(const std::string& id, bool covered) const {
+    const auto* page = tab(id);
+    return page && !covered && !page->snoozed() && id == state.activeTabID
+        && page->spaceID == state.activeSpaceID;
+}
+
 bool BrowserModel::selectTab(const std::string& id, double now) {
     auto* selected = tab(id);
     if (!selected) return false;

@@ -93,6 +93,8 @@ Links opened from other apps reuse a pinned tab for that page or a path below it
 
 Right-click a link for **Open Link in New Tab**, or an image for **Copy Image** and **Open Image in New Tab**. New tabs open in the background and follow the same Space and session rules as other new-tab links. Copy Image puts the image itself on the macOS clipboard; unavailable images cannot be copied.
 
+New background tabs load their pages without starting media until first shown. This also applies to tabs in another Space and pages behind Projects, Activity or Reading. After opening a tab, switching away does not mute or pause its playback; Chromium's normal media and autoplay rules still apply. The existing idle-unload timeout is unchanged.
+
 The reading list (**⌘ ⇧ L**, or the tray in the rail) belongs to no Space. Press **⌘ V** there to save the link on your clipboard, or save the current page with **⌘ ⇧ D**. Saved pages load in the background, using the session of the Space that a rule assigns them to, or otherwise the current Space, and appear as plain articles you can read offline. Long reads resume where you stopped. Opening an item never marks it read: press **E** or use **Mark read**, and press it again to undo. **J** and **K** move through the list. Pages behind a login, or with too little text, open as a tab instead. **Open original** and links in an article follow your pinned tabs and Space rules.
 
 Feeds live in the same list. Use **Manage › Add Feed…** with a feed or site address. Feeds are checked every 30 minutes while the app is open, and a new feed brings only its five newest posts. The list is stored in `reading.json`, with saved articles in `Reading/`.
@@ -144,6 +146,7 @@ npm test                       # Changesets, commit hooks, versioning, native ve
 node scripts/smoke-test.mjs     # Node 22+: actual native app + Chromium integration checks
 node scripts/devtools-smoke.mjs # DevTools docking, close button, shortcut/menu toggles and lifecycle
 node scripts/context-menu-smoke.mjs # Right-click links/images, background tabs, image clipboard formats
+node scripts/background-media-smoke.mjs # Initial media deferral, first activation, background playback and lifecycle (ffmpeg required)
 node scripts/find-smoke.mjs     # Live find bar, counts, navigation, wraparound, keyboard, focus and tab isolation
 node scripts/pinned-tabs-smoke.mjs # Pinned ordering, insertion feedback, pin/unpin, selection, Spaces and restart
 node scripts/projects-smoke.mjs # Projects and Activity, health checks, sign-in states, opening environments
@@ -156,6 +159,8 @@ node scripts/theme-smoke.mjs    # All three themes: live switching, no stale sur
 `context-menu-smoke.mjs` preserves and restores the clipboard while checking image copying. Set `RAIL_TEST_MOCK_KEYCHAIN=1` to run this check with Chromium's mock Keychain when local Keychain access is unavailable; that mode does not verify real Keychain encryption.
 
 `pinned-tabs-smoke.mjs` drives the native drop callbacks in a disposable profile and saves insertion-feedback captures. It checks all control sizes and themes, but not AppKit's physical drag gesture. Also check manually: drag pins before/after tiles and across rows in a scrolled sidebar, cancel a drag, unpin/repin, and drag a pin or selected regular tabs onto a Space. The insertion line should follow the pointer, disappear on exit, and the saved order should survive relaunch.
+
+The background-media smoke uses local PCM audio and VP8/Opus video, supported by the official engine, not YouTube or H.264/AAC. See [media policy and verification](docs/background-media.md) for the pinned CEF investigation and remaining native checks.
 
 The integration test uses disposable profiles under `.runtime-test`, a localhost fixture, and a development-only control channel. It verifies shared and isolated cookies, popup separation, native CMD+S, pinned-tab destruction/recreation, session switching, clean quit, and persistence across restart. Automation requires an explicit data directory and refuses the normal browser profile. Tests use a separate **Rail Test Safe Storage** Keychain entry, shared across test runs, with real Chromium cookie encryption. The normal browser keeps using **Rail Safe Storage**. Keep the same signing certificate to retain Keychain approvals; a locked login Keychain can still require unlocking. The control channel and remote debugging are enabled only by explicit test arguments.
 

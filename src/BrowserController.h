@@ -10,7 +10,7 @@
 - (void)start;
 - (void)quit:(id)sender;
 - (BOOL)handleShortcut:(NSEvent *)event;
-- (BOOL)pageIsCovered;
+- (BOOL)canFocusTab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)passwordReply:(CefRefPtr<CefProcessMessage>)message tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)passwordPageNavigating:(const std::string &)tab generation:(uint64_t)generation;
 - (void)openExternalURLs:(NSArray<NSURL *> *)urls;
@@ -25,7 +25,7 @@
 - (void)loadFailed:(NSString *)message tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)findResult:(int)identifier count:(int)count ordinal:(int)ordinal final:(BOOL)finalUpdate tab:(const std::string &)tab generation:(uint64_t)generation;
 - (void)openLinkFrom:(const std::string &)source generation:(uint64_t)generation url:(NSString *)url background:(BOOL)background;
-- (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client;
+- (BOOL)preparePopupFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID url:(NSString *)url background:(BOOL)background windowInfo:(CefWindowInfo &)info client:(CefRefPtr<CefClient> &)client;
 - (void)popupAbortedFrom:(const std::string &)source generation:(uint64_t)generation popupID:(int)popupID;
 - (void)setStatus:(NSString *)message;
 - (void)requestExternalAppURL:(NSString *)url fromPage:(NSString *)page tab:(const std::string &)tab generation:(uint64_t)generation;

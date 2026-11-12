@@ -107,10 +107,10 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
-  // A page starting or navigating behind Reading or Home must not take the keyboard from them.
+  // Hidden tabs must not acquire native focus on their initial navigation.
   bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource) override {
     CEF_REQUIRE_UI_THREAD();
-    return [controller_ pageIsCovered];
+    return ![controller_ canFocusTab:tabID_ generation:generation_];
   }
   void OnFindResult(CefRefPtr<CefBrowser>, int identifier, int count, const CefRect &,
       int ordinal, bool finalUpdate) override {
@@ -183,11 +183,13 @@ class RailClient final : public CefClient, public CefLifeSpanHandler, public Cef
       [controller_ requestExternalAppURL:S(url) fromPage:frame ? S(frame->GetURL()) : @"" tab:tabID_ generation:generation_];
       return true;
     }
-    if (disposition == CEF_WOD_NEW_BACKGROUND_TAB && !url.empty()) {
+    // Keep an initially blank script popup alive so its opener can populate it.
+    if (disposition == CEF_WOD_NEW_BACKGROUND_TAB && !url.empty() && url.ToString() != "about:blank") {
       [controller_ openLinkFrom:tabID_ generation:generation_ url:S(url) background:YES];
       return true;
     }
-    return ![controller_ preparePopupFrom:tabID_ generation:generation_ popupID:popupID url:S(url) windowInfo:info client:client];
+    return ![controller_ preparePopupFrom:tabID_ generation:generation_ popupID:popupID url:S(url)
+      background:disposition == CEF_WOD_NEW_BACKGROUND_TAB windowInfo:info client:client];
   }
   void OnBeforePopupAborted(CefRefPtr<CefBrowser>, int popupID) override {
     [controller_ popupAbortedFrom:tabID_ generation:generation_ popupID:popupID];

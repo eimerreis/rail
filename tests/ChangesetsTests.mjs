@@ -88,6 +88,13 @@ test('PR checks cover stacked branch bases while publication remains main-only',
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main' && github\.event_name != 'pull_request'/);
 });
 
+test('native release checks include pinned ordering and initial background playback', () => {
+  const smoke = read(root, 'scripts/release-smoke.sh');
+  assert.match(smoke, /^node scripts\/pinned-tabs-smoke\.mjs$/m);
+  assert.match(smoke, /^node scripts\/background-media-smoke\.mjs$/m);
+  assert.match(smoke, /command -v ffmpeg/);
+});
+
 test('a chore(deps) commit needs no changeset, but other commit types still do', t => {
   const cwd = fixture(t), base = git(cwd, 'rev-parse', 'HEAD').trim();
   write(cwd, 'deps.txt', 'bumped\n'); const head = commit(cwd, 'chore(deps): bump the npm-minor-and-patch group');
