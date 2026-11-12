@@ -153,6 +153,7 @@ test('the actual CLI batches patch and minor changes into one native app version
   for (const name of ['BrowserModel', 'History', 'Projects', 'Reading', 'TrackedRuns']) for (const ext of ['cpp', 'h']) {
     write(cwd, `src/${name}.${ext}`, read(root, `src/${name}.${ext}`));
   }
+  write(cwd, 'src/SearchEngine.h', read(root, 'src/SearchEngine.h'));
   const cmake = existsSync(join(root, '.tools/bin/cmake')) ? join(root, '.tools/bin/cmake') : 'cmake';
   execFileSync(cmake, ['-S', cwd, '-B', join(cwd, 'build'), '-DRAIL_BUILD_APP=OFF', '-DBUILD_TESTING=OFF'], { stdio: 'pipe' });
   assert.match(read(cwd, 'build/CMakeCache.txt'), /CMAKE_PROJECT_VERSION:STATIC=0\.2\.0/);

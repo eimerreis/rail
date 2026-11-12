@@ -1,5 +1,6 @@
 #include "BrowserModel.h"
 #include "Projects.h"
+#include "SearchEngine.h"
 
 #include <algorithm>
 #include <atomic>
@@ -521,6 +522,7 @@ void BrowserModel::sanitize(double now) {
     if (state.controlSize != "normal" && state.controlSize != "large") state.controlSize = "small";
     if (state.sidebarAnimation != "off" && state.sidebarAnimation != "subtle") state.sidebarAnimation = "full";
     if (state.theme != "nightline" && state.theme != "daylight") state.theme = "porcelain";
+    state.searchEngine = searchEngineForID(state.searchEngine).id;
     state.devToolsWidth = std::isfinite(state.devToolsWidth) ? std::clamp(state.devToolsWidth, 240.0, 1600.0) : 480;
 
     if (state.sessions.empty()) state.sessions = {{"work", "Work"}, {"personal", "Personal"}};
